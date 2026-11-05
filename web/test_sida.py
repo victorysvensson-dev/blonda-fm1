@@ -70,8 +70,8 @@ with sync_playwright() as p:
     pg.wait_for_timeout(1200)
     pg.evaluate("() => { window.__ctx = () => ctx; window.__node = () => node || spn; }")
     lit = pg.evaluate("""() => { const g = document.getElementById('lcd').getContext('2d').getImageData(0,0,240,240).data;
-      let y = 0; for (let i = 0; i < g.length; i += 4) if (g[i] > 200 && g[i+1] > 150 && g[i+2] < 60) y++; return y; }""")
-    check(lit > 2000, f"skärmen visar BRIS innan ljudet startat ({lit} gula punkter)")
+      let y = 0; for (let i = 0; i < g.length; i += 4) if (g[i] > 150 || g[i+1] > 150) y++; return y; }""")
+    check(lit > 2000, f"skärmen visar BRIS innan ljudet startat ({lit} tända punkter)")
     pg.screenshot(path=os.path.join(OUT, "webb-1-start.png"))
 
     pg.click("#start")
@@ -119,6 +119,16 @@ with sync_playwright() as p:
     pg.mouse.move(k1["x"] + 29, k1["y"] + 29); pg.mouse.down(); pg.mouse.move(k1["x"] + 29, k1["y"] - 60, steps=8); pg.mouse.up()
     pg.wait_for_timeout(250)
     check(lcd_hash() != h1, "KNOB1 ändrar värdet (dra)")
+    # ALGORITHM (ERA): rulla upp -> texten uppe till höger på skärmen ändras (MODERN -> TAPE)
+    era_hash = lambda: pg.evaluate("() => { const g = document.getElementById('lcd').getContext('2d').getImageData(160,28,72,16).data; let h=0; for (const v of g) h=(h*31+v)|0; return h; }")
+    e0 = era_hash()
+    ka = pg.query_selector('.knob[data-enc="1"]').bounding_box()
+    pg.mouse.move(ka["x"] + 29, ka["y"] + 29)
+    for _ in range(20):
+        pg.mouse.wheel(0, -100)
+    pg.wait_for_timeout(300)
+    check(era_hash() != e0, "ALGORITHM ställer ERA (TAPE syns på skärmen)")
+    pg.screenshot(path=os.path.join(OUT, "webb-2b-tape.png"))
     # sidknapp: FX -> lysdioden tänds
     pg.click("text=FX")
     pg.wait_for_timeout(250)

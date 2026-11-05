@@ -1,24 +1,31 @@
 <title>BRIS FM-1 Emulator</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
-/* Layout: en instrumentpanel i samma läge som FM-1 (rattar vänster, skärm i mitten, rattar och knappar höger,
-   två rader tangenter under), skalad som en helhet till skärmens bredd; text kort under. */
+/* Layout: ett instrument i trä och elfenben (gavlar i valnöt, tryckt panel, svart skärm), rattarna och knapparna
+   där FM-1 har dem, skalat som en helhet; kort text under på mörk bakgrund. Ett utseende, mörk sida. */
 :root {
   color-scheme: dark;
-  --bg: #0b0a07;          /* bordet */
-  --panel: #16140e;       /* panelens yta */
-  --panel-hi: #221f15;    /* kanter och upphöjt */
-  --rubber: #2a271d;      /* knappar och tangenter */
-  --ink: #e9e4d2;         /* text */
-  --mute: #8f8873;        /* etiketter */
-  --yel: #ffd600;         /* BLONDA-gult, samma som på skärmen */
-  --yel-dim: #5c4e05;     /* glöd */
-  --f-dot: "DotGothic16", "Courier New", ui-monospace, monospace;
+  --bg: #262522;          /* bordet */
+  --fg: #ece6d6;          /* text på bordet */
+  --fg-mute: #a39b88;
+  --panel: #e9e3d2;       /* panelens elfenben */
+  --panel-shade: #d8d0bb;
+  --ink: #2a2723;         /* tryck på panelen */
+  --ink-mute: #7a7262;
+  --wood: #6b4529;        /* valnöt */
+  --wood-dark: #3f2717;
+  --orange: #f26a2c;      /* signalfärgen */
+  --orange-dim: #8a4a2c;
+  --teal: #2f8f89;
+  --ivory: #f5f0e2;       /* tangenter */
+  --ebony: #1f1d1a;
+  --btn: #f0eadb;
+  --f-label: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
   --f-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
 }
-html, body { background: var(--bg); color: var(--ink); }
+html, body { background: var(--bg); color: var(--fg); }
 body {
   font-family: var(--f-body); font-size: 15px; line-height: 1.5;
   padding-left: max(16px, env(safe-area-inset-left, 0px));
@@ -27,68 +34,75 @@ body {
 }
 .wrap { max-width: 1000px; margin: 0 auto; display: grid; gap: 20px; }
 header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 20px; }
-h1 { font-family: var(--f-dot); font-weight: 400; font-size: 34px; letter-spacing: .06em; margin: 0; color: var(--yel); line-height: 1; }
-h1 small { font-size: 15px; color: var(--mute); letter-spacing: .12em; margin-left: 10px; }
-.status { font-family: var(--f-dot); font-size: 14px; letter-spacing: .08em; color: var(--mute); display: flex; gap: 14px; align-items: center; }
-.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yel-dim); display: inline-block; margin-right: 6px; vertical-align: 1px; }
-.status .on .dot { background: var(--yel); box-shadow: 0 0 8px var(--yel); }
+h1 { font-family: var(--f-label); font-weight: 600; font-size: 38px; letter-spacing: .16em; margin: 0; color: var(--fg); line-height: 1; }
+h1 small { font-size: 15px; font-weight: 500; color: var(--orange); letter-spacing: .18em; margin-left: 12px; }
+.status { font-family: var(--f-label); font-size: 15px; letter-spacing: .14em; color: var(--fg-mute); display: flex; gap: 16px; align-items: center; }
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--orange-dim); display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.status .on .dot { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
 
 /* panelen: 960 x 580 punkter, skalas med --s */
 .stage { width: 100%; aspect-ratio: 960 / 580; max-width: 100%; position: relative; }
 .panel {
-  position: absolute; left: 0; top: 0; width: 960px; height: 580px; transform-origin: 0 0;
-  transform: scale(var(--s, 1)); background: var(--panel); border-radius: 46px;
-  box-shadow: inset 0 0 0 2px var(--panel-hi), 0 30px 60px -30px #000;
-  touch-action: none; user-select: none; -webkit-user-select: none;
+  position: absolute; left: 0; top: 0; width: 960px; height: 580px; transform-origin: 0 0; transform: scale(var(--s, 1));
+  border-radius: 14px; touch-action: none; user-select: none; -webkit-user-select: none;
+  background:
+    linear-gradient(90deg, var(--wood-dark) 0, var(--wood) 6px, #7d5534 14px, var(--wood) 22px, var(--wood-dark) 28px, transparent 28px,
+                    transparent calc(100% - 28px), var(--wood-dark) calc(100% - 28px), var(--wood) calc(100% - 22px), #7d5534 calc(100% - 14px), var(--wood) calc(100% - 6px), var(--wood-dark) 100%),
+    linear-gradient(180deg, #f1ecdd 0, var(--panel) 40%, var(--panel-shade) 100%);
+  box-shadow: 0 34px 60px -28px #000, inset 0 1px 0 #fff8;
 }
-.lbl { position: absolute; font-family: var(--f-dot); font-size: 14px; letter-spacing: .1em; color: var(--mute); transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
-.brand { position: absolute; left: 584px; top: 272px; font-family: var(--f-dot); font-size: 13px; letter-spacing: .3em; color: var(--yel-dim); }
+.lbl { position: absolute; font-family: var(--f-label); font-weight: 600; font-size: 15px; letter-spacing: .16em; color: var(--ink); transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
+.lbl.sub { font-size: 12px; font-weight: 500; color: var(--orange); top: 236px; letter-spacing: .14em; }
+.brand { position: absolute; left: 584px; top: 270px; font-family: var(--f-label); font-weight: 600; font-size: 15px; letter-spacing: .4em; color: var(--ink); }
+.brand b { color: var(--orange); font-weight: 600; }
+.rule { position: absolute; height: 2px; background: var(--ink); opacity: .85; }
 
 .knob { position: absolute; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; cursor: ns-resize; outline: none; }
 .knob svg { width: 100%; height: 100%; display: block; }
-.knob:focus-visible { box-shadow: 0 0 0 3px var(--yel); }
-.knob.master { cursor: ns-resize; }
+.knob:focus-visible { box-shadow: 0 0 0 3px var(--orange); }
 
 .btn {
-  position: absolute; width: 52px; height: 50px; border-radius: 12px; background: var(--rubber); color: var(--mute);
-  font-family: var(--f-dot); font-size: 13px; letter-spacing: .06em; border: 0; padding: 14px 0 0; cursor: pointer;
-  box-shadow: inset 0 -3px 0 #0006, inset 0 1px 0 #ffffff10; touch-action: none;
+  position: absolute; width: 52px; height: 50px; border-radius: 6px; background: var(--btn); color: var(--ink);
+  font-family: var(--f-label); font-weight: 600; font-size: 14px; letter-spacing: .08em; border: 0; padding: 14px 0 0; cursor: pointer;
+  box-shadow: 0 3px 0 #b9b19c, 0 4px 6px -2px #0006, inset 0 1px 0 #fff; touch-action: none;
 }
-.btn::before { content: ""; position: absolute; left: 50%; top: 7px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: #0008; }
-.btn[data-led="2"]::before { background: var(--yel-dim); }
-.btn[data-led="1"]::before { background: var(--yel); box-shadow: 0 0 8px var(--yel); }
-.btn[data-led="1"] { color: var(--ink); }
-.btn.down { transform: translateY(1px); box-shadow: inset 0 1px 0 #0008; background: #24211a; }
-.btn:focus-visible { outline: 3px solid var(--yel); outline-offset: 2px; }
-.btn.oct { width: 74px; height: 40px; padding: 0; }
+.btn::before { content: ""; position: absolute; left: 50%; top: 7px; width: 7px; height: 7px; margin-left: -3.5px; border-radius: 50%; background: #c9c1ab; box-shadow: inset 0 1px 1px #0003; }
+.btn[data-led="2"]::before { background: #e8b79d; }
+.btn[data-led="1"]::before { background: var(--orange); box-shadow: 0 0 8px var(--orange); }
+.btn.down { transform: translateY(2px); box-shadow: 0 1px 0 #b9b19c, inset 0 1px 2px #0003; }
+.btn:focus-visible { outline: 3px solid var(--orange); outline-offset: 2px; }
+.btn.oct { width: 74px; height: 40px; padding: 0; background: var(--ebony); color: var(--panel); box-shadow: 0 3px 0 #000, 0 4px 6px -2px #0008; }
 .btn.oct::before { display: none; }
 
-.screen-bezel { position: absolute; left: 300px; top: 34px; width: 268px; height: 268px; border-radius: 26px; background: #000; box-shadow: inset 0 0 0 2px var(--panel-hi); }
-canvas#lcd { position: absolute; left: 14px; top: 14px; width: 240px; height: 240px; image-rendering: pixelated; border-radius: 4px; background: #000; }
+.screen-bezel { position: absolute; left: 300px; top: 32px; width: 268px; height: 268px; border-radius: 10px; background: #0b0a09;
+  box-shadow: 0 0 0 3px var(--ink), inset 0 0 0 2px #222, 0 10px 18px -10px #0008; }
+canvas#lcd { position: absolute; left: 14px; top: 14px; width: 240px; height: 240px; image-rendering: pixelated; border-radius: 2px; background: #000; }
 .start {
-  position: absolute; left: 14px; top: 14px; width: 240px; height: 240px; border: 0; border-radius: 4px; cursor: pointer;
-  background: #000c; color: var(--yel); font-family: var(--f-dot); font-size: 20px; letter-spacing: .1em; display: grid; place-items: center;
+  position: absolute; left: 14px; top: 14px; width: 240px; height: 240px; border: 0; border-radius: 2px; cursor: pointer;
+  background: #000c; color: var(--orange); font-family: var(--f-label); font-weight: 600; font-size: 22px; letter-spacing: .16em; display: grid; place-items: center;
 }
-.start span { display: block; font-size: 13px; color: var(--mute); margin-top: 8px; letter-spacing: .08em; }
+.start span { display: block; font-size: 13px; color: var(--ivory); margin-top: 8px; letter-spacing: .12em; }
 
-.keys { position: absolute; left: 34px; top: 334px; width: 892px; height: 222px; border-radius: 28px; background: #0f0e0a; box-shadow: inset 0 0 0 2px #00000080; }
-.key { position: absolute; border-radius: 26px; background: var(--rubber); box-shadow: inset 0 -4px 0 #0007, inset 0 1px 0 #ffffff0d; cursor: pointer; touch-action: none; }
-.key::after { content: ""; position: absolute; left: 50%; top: 18%; bottom: 18%; width: 4px; margin-left: -2px; border-radius: 2px; background: #00000055; }
-.key.w { width: 48px; height: 104px; top: 108px; }
-.key.b { width: 46px; height: 94px; top: 10px; }
-.key.on { background: var(--yel); box-shadow: 0 0 18px #ffd60055; }
-.key.on::after { background: #0000002e; }
+.keys { position: absolute; left: 34px; top: 334px; width: 892px; height: 222px; border-radius: 8px; background: linear-gradient(180deg, #1a1816, #2a2622); box-shadow: inset 0 3px 8px #000a; }
+.key { position: absolute; border-radius: 24px; cursor: pointer; touch-action: none; }
+.key::after { content: ""; position: absolute; left: 50%; top: 20%; bottom: 20%; width: 3px; margin-left: -1.5px; border-radius: 2px; }
+.key.w { width: 48px; height: 104px; top: 108px; background: linear-gradient(180deg, var(--ivory), #e2dccb); box-shadow: 0 4px 0 #b8b19f, 0 6px 8px -3px #000a; }
+.key.w::after { background: #0000001c; }
+.key.b { width: 46px; height: 94px; top: 10px; background: linear-gradient(180deg, #34302b, var(--ebony)); box-shadow: 0 4px 0 #000, 0 6px 8px -3px #000c; }
+.key.b::after { background: #ffffff14; }
+.key.on { background: var(--orange); box-shadow: 0 1px 0 #9c4119, 0 0 18px #f26a2c66; transform: translateY(3px); }
+.key.on::after { background: #0000002a; }
 
 .help { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 28px; }
 .help section { min-width: 0; }
-.help h2 { font-family: var(--f-dot); font-weight: 400; font-size: 15px; letter-spacing: .12em; color: var(--yel); margin: 0 0 6px; text-wrap: balance; }
-.help p, .help ul { margin: 0; color: var(--ink); max-width: 62ch; }
+.help h2 { font-family: var(--f-label); font-weight: 600; font-size: 17px; letter-spacing: .16em; color: var(--orange); margin: 0 0 6px; text-wrap: balance; }
+.help p, .help ul { margin: 0; color: var(--fg); max-width: 62ch; }
 .help ul { padding-left: 18px; }
 .help li { margin: 2px 0; }
-kbd { font-family: var(--f-dot); font-size: 13px; background: var(--rubber); color: var(--ink); border-radius: 5px; padding: 0 6px; }
-.note { color: var(--mute); font-size: 13px; }
-a { color: var(--yel); }
-@media (prefers-reduced-motion: reduce) { .key.on, .status .on .dot { box-shadow: none; } }
+kbd { font-family: var(--f-label); font-weight: 600; font-size: 13px; background: var(--ivory); color: var(--ink); border-radius: 4px; padding: 0 6px; }
+.note { color: var(--fg-mute); font-size: 13px; }
+a { color: var(--orange); }
+@media (prefers-reduced-motion: reduce) { .key.on, .status .on .dot, .btn[data-led="1"]::before { box-shadow: none; } .key.on { transform: none; } }
 </style>
 
 <div class="wrap">
@@ -106,6 +120,7 @@ a { color: var(--yel); }
       <span class="lbl" style="left:190px;top:28px">SELECT</span>
       <span class="lbl" style="left:80px;top:136px">PRESETS</span>
       <span class="lbl" style="left:190px;top:136px">ALGORITHM</span>
+      <span class="lbl sub" style="left:190px;top:228px">ERA</span>
       <span class="lbl" style="left:630px;top:28px">KNOB1</span>
       <span class="lbl" style="left:720px;top:28px">KNOB2</span>
       <span class="lbl" style="left:810px;top:28px">KNOB3</span>
@@ -129,7 +144,8 @@ a { color: var(--yel); }
       </div>
 
       <div id="btns"></div>
-      <span class="brand">BLONDA BRIS</span>
+      <span class="brand">BLONDA <b>BRIS</b></span>
+      <span class="rule" style="left:34px;top:312px;width:892px"></span>
 
       <div class="keys" id="keys"></div>
     </div>
@@ -148,6 +164,7 @@ a { color: var(--yel); }
       <h2>RATTAR OCH KNAPPAR</h2>
       <ul>
         <li>Dra rattarna upp och ner, eller rulla. PRESETS byter ljud.</li>
+        <li>ALGORITHM är ERA: från MODERN (rent) via TAPE (kassett som slits) till LOFI (färre bitar). Står uppe till höger på skärmen.</li>
         <li>KNOB1–4 ändrar de fyra värdena på skärmen, SELECT bläddrar sidor.</li>
         <li>SEL filter · EDIT osc · ENV höljen · LFO · FX · GLO röst. Tryck igen för andra halvan.</li>
         <li>SAVE sparar ljudet i den här webbläsaren.</li>
@@ -331,11 +348,19 @@ async function startAudio() {
 function audioOn(text) { $("st-audio").classList.add("on"); $("st-audio").lastChild.textContent = text; }
 
 // ---------- panelen: rattar
+// rattarna: svart kjol med räffling, lock i panelens färger (orange för KNOB1-4, petrol för ERA)
 function knobSvg(el, master) {
-  el.innerHTML = '<svg viewBox="0 0 58 58" aria-hidden="true"><circle cx="29" cy="29" r="27" fill="#0d0c08"/>' +
-    '<circle cx="29" cy="29" r="23" fill="#2c291f" stroke="#3a3628" stroke-width="2"/>' +
-    (master ? '<path d="M10 45 A23 23 0 1 1 48 45" fill="none" stroke="#5c4e05" stroke-width="3" stroke-linecap="round"/>' : "") +
-    '<g class="ind"><rect x="27.5" y="7" width="3" height="14" rx="1.5" fill="#ffd600"/></g></svg>';
+  const enc = el.dataset.enc, cap = enc >= "2" && enc <= "5" ? "#f26a2c" : enc === "1" ? "#2f8f89" : "#2a2622";
+  const line = cap === "#2a2622" ? "#ece6d6" : "#1f1d1a";
+  let ticks = "";
+  if (master) for (let i = 0; i <= 10; i++) {
+    const a = (-135 + 27 * i) * Math.PI / 180, x1 = 29 + Math.sin(a) * 26, y1 = 29 - Math.cos(a) * 26, x2 = 29 + Math.sin(a) * 29, y2 = 29 - Math.cos(a) * 29;
+    ticks += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#2a2723" stroke-width="1.4"/>`;
+  }
+  el.innerHTML = `<svg viewBox="0 0 58 58" aria-hidden="true">${ticks}<circle cx="29" cy="31" r="24" fill="#00000030"/>` +
+    '<circle cx="29" cy="29" r="24" fill="#151311"/><circle cx="29" cy="29" r="24" fill="none" stroke="#3a3630" stroke-width="2" stroke-dasharray="2 2.2"/>' +
+    `<circle cx="29" cy="29" r="15.5" fill="${cap}"/><circle cx="29" cy="27.5" r="14" fill="#ffffff14"/>` +
+    `<g class="ind"><rect x="27.6" y="7" width="2.8" height="16" rx="1.4" fill="${line}"/></g></svg>`;
 }
 let masterV = 0.8;
 const masterQ12 = () => Math.round(masterV * 4096);

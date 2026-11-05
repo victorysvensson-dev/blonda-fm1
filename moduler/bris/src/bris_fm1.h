@@ -27,6 +27,13 @@ void bris_init(void);                           /* nollställer allt och laddar 
 void bris_reset(void);                          /* tystar och nollställer ljudet, behåller parametrarna */
 void bris_render(float *L, float *R, uint32_t n);   /* skriver n sampel (n delbart med BRIS_K går snabbast) */
 
+/* Samma sak i tre steg, för två kärnor (fm1-dock:s c1_run): begin, sedan rösterna i två delar (den ena på andra
+ * kärnan, till mix 1), sedan end. n högst BRIS_MAXN. Delarna får inte överlappa. */
+#define BRIS_MAXN 256
+void bris_render_begin(uint32_t n);
+void bris_render_voices(uint32_t first, uint32_t last, uint32_t mix);
+void bris_render_end(float *L, float *R);
+
 void bris_note_on(int note, int vel);           /* vel 1..127 */
 void bris_note_off(int note);
 void bris_all_notes_off(void);

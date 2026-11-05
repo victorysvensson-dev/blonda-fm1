@@ -6,14 +6,18 @@
  *   PRESETS            byt fabriksljud (90 st, laddas direkt)
  *   KNOB1..4           de fyra parametrarna på sidan som visas
  *   SELECT             nästa / förra sidan
- *   ALGORITHM          vågform (såg, puls, båda)
+ *   ALGORITHM          ERA: inbyggt band och lofi efter BRIS. 0 MODERN (rent, som BRIS), 1..60 TAPE (kassett som
+ *                      slits mer och mer), 61..100 LOFI (digital: färre bitar och lägre samplingsfrekvens). MIDI CC 77.
  *   SEL FILTER · EDIT OSC · ENV EG2/EG1 · LFO 1/2 · FX · GLO VOICE/PLAY   (tryck igen: sidans andra halva)
  *   SAVE               sparar ljudet som det är nu; det laddas när BRIS startar nästa gång
  * Med KNOBS CC påslaget i fm1-dock kommer rattarna som CC 74, 71, 73, 72: cutoff, resonans, EG2 attack, release. */
 #include "hb_module.h"
 #include "bris_fm1.h"
+#include "sliten_fm1.h"
 
 static const hb_host_t *H;
+static char *put_int(char *s, int32_t v);
+static char *put_str(char *s, const char *a);
 
 /* ------------------------------------------------------------------ sidor */
 typedef struct { const char *title; uint8_t btn; int8_t p[4]; } page_t;
@@ -32,21 +36,75 @@ static const page_t PAGES[] = {
 
 /* ------------------------------------------------------------------ tillstånd */
 #define SET_MAGIC 0x53495242u                   /* "BRIS" */
+#define SET_VERSION 2                           /* 2: era */
 typedef struct {
     uint32_t magic;
     uint8_t version, preset, page, edited;
     float p[BP_N];
-} settings_t;                                   /* 152 byte (värden upp till 240) */
+    float era;
+} settings_t;                                   /* 156 byte (värden upp till 240) */
 
 static int preset = 1, page, edited;
 static volatile uint32_t saved_ms;              /* när SAVE trycktes (meddelandet visas en stund) */
 static uint32_t at_max;                          /* största tangenttrycket just nu */
 
 /* vad som syns, för att bara rita om det som ändrats */
-static struct { int preset, page, edited, saved, row[4]; uint32_t voices; int32_t val[4]; } shown;
+static struct { int preset, page, edited, saved, era, row[4]; uint32_t voices; int32_t val[4]; } shown;
 
-static const uint16_t C_YEL = HB_RGB(255, 214, 0), C_YDIM = HB_RGB(110, 92, 0), C_GRAY = HB_RGB(120, 120, 120),
-                      C_BAR0 = HB_RGB(48, 40, 0), C_BLACK = 0;
+/* skärmens färger: varmt elfenben, orange och petrol på svart, som gamla instrumentpaneler */
+static const uint16_t C_NAME = HB_RGB(236, 230, 214),    /* ljudets namn */
+                      C_VAL = HB_RGB(242, 106, 44),      /* värden, staplar, rösterna */
+                      C_LBL = HB_RGB(158, 150, 132),     /* parametrarnas namn */
+                      C_HEAD = HB_RGB(52, 150, 144),     /* nummer, bank, sidan */
+                      C_TRACK = HB_RGB(56, 40, 30),      /* staplarnas spår */
+                      C_RULE = HB_RGB(78, 70, 58),       /* linjen */
+                      C_BLACK = 0;
+
+/* ------------------------------------------------------------------ ERA: band och lofi efter BRIS */
+static sliten_t tape;
+static volatile int32_t era;                    /* 0..100, ALGORITHM-ratten */
+static int tape_on;                             /* SLITEN räknar (även medan den tonar ut) */
+
+/* ratten till SLITEN:s parametrar (BLONDA SLITEN i blonda-motor). Inga avbrott: de digitala mediernas
+ * upprepning behöver en längre buffert än modulen har plats för. */
+static void era_apply(void)
+{
+    int32_t e = era;
+    if (e <= 0) { sliten_set(&tape, SL_wet, 0.f); return; }
+    if (e <= 60) {                              /* TAPE: kassett som slits mer och mer */
+        float t = (float)e / 60.f;
+        sliten_set(&tape, SL_media, 0.f);
+        sliten_set(&tape, SL_age, 0.2f + 0.8f * t);
+        sliten_set(&tape, SL_wow, 0.35f);
+        sliten_set(&tape, SL_flut, 0.3f);
+        sliten_set(&tape, SL_sat, 0.3f + 0.4f * t);
+        sliten_set(&tape, SL_brus, 0.15f + 0.35f * t);
+        sliten_set(&tape, SL_avbr, 0.15f * t * t);
+        sliten_set(&tape, SL_ton, 0.62f - 0.25f * t);
+    } else {                                    /* LOFI: digitalt, färre bitar och lägre samplingsfrekvens */
+        float t = (float)(e - 60) / 40.f;
+        sliten_set(&tape, SL_media, 2.f);
+        sliten_set(&tape, SL_age, 0.35f + 0.65f * t);
+        sliten_set(&tape, SL_sat, 0.4f);
+        sliten_set(&tape, SL_avbr, 0.f);
+        sliten_set(&tape, SL_ton, 0.5f - 0.25f * t);
+    }
+    sliten_set(&tape, SL_bredd, 1.f);
+    sliten_set(&tape, SL_outv, 0.75f);
+    sliten_set(&tape, SL_wet, 1.f);
+}
+static void set_era(int32_t e)
+{
+    era = e < 0 ? 0 : e > 100 ? 100 : e;
+    if (era > 0 && !tape_on) { sliten_reset(&tape); tape.sWet = 0.f; }   /* tonar in från rent */
+    era_apply();
+    if (era > 0) tape_on = 1;
+}
+static char *era_text(char *s)
+{
+    if (era <= 0) return put_str(s, "MODERN");
+    return put_int(put_str(s, era <= 60 ? "TAPE " : "LOFI "), era);
+}
 
 /* ------------------------------------------------------------------ hjälp */
 static float clampf(float x, float lo, float hi) { return x < lo ? lo : x > hi ? hi : x; }
@@ -104,13 +162,26 @@ static void leds(void)
 }
 
 /* ------------------------------------------------------------------ ljud */
-static float bufL[256], bufR[256];
+static float bufL[BRIS_MAXN], bufR[BRIS_MAXN];
+
+/* den andra kärnan: röst 3..5 där, när fm1-dock lånar ut den (c1_run), annars allt på kärna 0 */
+static int c1_ok;
+static void c1_voices(uint32_t arg) { (void)arg; bris_render_voices(3, BRIS_NV, 1); }
 
 static void render(int32_t *out, uint32_t n)
 {
     while (n) {
-        uint32_t k = n > 256u ? 256u : n, i;
-        bris_render(bufL, bufR, k);
+        uint32_t k = n > BRIS_MAXN ? BRIS_MAXN : n, i;
+        int two;
+        bris_render_begin(k);
+        two = c1_ok && H->c1_run(c1_voices, 0);
+        bris_render_voices(0, two ? 3 : BRIS_NV, 0);
+        if (two && H->c1_wait() != 0) c1_voices(0);   /* kärna 1 blev inte klar (och är tagen nu): räkna här */
+        bris_render_end(bufL, bufR);
+        if (tape_on) {
+            sliten_process(&tape, bufL, bufR, k);
+            if (era <= 0 && tape.sWet < 0.0005f) tape_on = 0;   /* helt uttonad: räkna inte längre */
+        }
         for (i = 0; i < k; i++) {
             float l = clampf(bufL[i], -1.f, 1.f) * 32767.f, r = clampf(bufR[i], -1.f, 1.f) * 32767.f;
             out[2u * i] += (int32_t)l;
@@ -142,6 +213,7 @@ static void cc(uint32_t ch, uint32_t num, uint32_t val)
     case 71: set_param(BP_res, v); break;
     case 73: set_param(BP_aa, v); break;
     case 72: set_param(BP_ar, v); break;
+    case 77: set_era((int32_t)(val * 100u + 63u) / 127); break;   /* ERA */
     default: break;
     }
 }
@@ -178,15 +250,16 @@ static void ui(uint32_t ev, int32_t arg)
         if (id >= HB_ENC_KNOB1 && id <= HB_ENC_KNOB4) turn(PAGES[page].p[id - HB_ENC_KNOB1], arg);
         else if (id == HB_ENC_PRESETS) load_preset(preset + arg);
         else if (id == HB_ENC_SELECT) { page = ((page + arg) % NPAGES + NPAGES) % NPAGES; leds(); }
-        else if (id == HB_ENC_ALGORITHM) turn(BP_vform, arg);
+        else if (id == HB_ENC_ALGORITHM) set_era(era + arg);
         return;
     }
     if (HB_EV_KIND(ev) != HB_EV_BTN_DOWN) return;
     if (id == HB_BTN_SAVE) {
         settings_t s;
         int i;
-        s.magic = SET_MAGIC; s.version = 1; s.preset = (uint8_t)preset; s.page = (uint8_t)page; s.edited = (uint8_t)edited;
+        s.magic = SET_MAGIC; s.version = SET_VERSION; s.preset = (uint8_t)preset; s.page = (uint8_t)page; s.edited = (uint8_t)edited;
         for (i = 0; i < BP_N; i++) s.p[i] = bris_get(i);
+        s.era = (float)era;
         H->save(&s, sizeof s);
         saved_ms = H->ms() | 1u;
         return;
@@ -213,13 +286,13 @@ static void draw_row(int r)
 
     int32_t tw = H->text_w(0, s);
     tw = tw > 90 ? 90 : tw;
-    H->text(8, y, 142, 0, BRIS_PARAMS[p].name, C_GRAY, 0);
+    H->text(8, y, 142, 0, BRIS_PARAMS[p].name, C_LBL, 0);
     H->fill(150, y, 82, 16, C_BLACK);           /* värdet högerställt */
-    H->text(232 - tw, y, tw, 0, s, C_YEL, 0);
+    H->text(232 - tw, y, tw, 0, s, C_VAL, 0);
     w = bar * 224 / 1000;
     w = w < 0 ? 0 : w > 224 ? 224 : w;
-    if (w) H->fill(8, y + 20, w, 5, C_YEL);
-    if (w < 224) H->fill(8 + w, y + 20, 224 - w, 5, C_BAR0);
+    if (w) H->fill(8, y + 20, w, 5, C_VAL);
+    if (w < 224) H->fill(8 + w, y + 20, 224 - w, 5, C_TRACK);
 }
 
 static void draw(uint32_t full)
@@ -229,7 +302,7 @@ static void draw(uint32_t full)
     int saving = saved_ms && H->ms() - saved_ms < 1500u;
     if (full) {
         H->fill(0, HB_TOP, 240, 240 - HB_TOP, C_BLACK);
-        shown.preset = shown.page = shown.edited = shown.saved = -1;
+        shown.preset = shown.page = shown.edited = shown.saved = shown.era = -1;
         shown.voices = ~0u;
     }
     if (preset != shown.preset || edited != shown.edited) {
@@ -237,13 +310,13 @@ static void draw(uint32_t full)
         const char *name = BRIS_PRESETS[preset].name;
         e = put_int(s, preset);
         if (preset < 10) { s[1] = s[0]; s[0] = '0'; s[2] = 0; e = s + 2; }
-        H->text(8, 28, 40, 0, s, C_YDIM, 0);
-        H->text(48, 28, 184, 0, preset == 0 ? "INIT" : preset <= BRIS_FACTORY ? "BRIS FACTORY" : "BLONDA", C_YDIM, 0);
+        H->text(8, 28, 40, 0, s, C_HEAD, 0);
+        H->text(48, 28, 112, 0, preset == 0 ? "INIT" : preset <= BRIS_FACTORY ? "BRIS FACTORY" : "BLONDA", C_HEAD, 0);
         e = put_str(s, name);
         if (edited) put_str(e, "*");
         H->fill(8, 44, 224, 32, C_BLACK);
-        if (H->text_w(1, s) <= 224) H->text(8, 44, 224, 1, s, C_YEL, 0);
-        else H->text(8, 52, 224, 0, s, C_YEL, 0);
+        if (H->text_w(1, s) <= 224) H->text(8, 44, 224, 1, s, C_NAME, 0);
+        else H->text(8, 52, 224, 0, s, C_NAME, 0);
         shown.preset = preset; shown.edited = edited;
     }
     if (page != shown.page || saving != shown.saved) {
@@ -253,8 +326,8 @@ static void draw(uint32_t full)
         if (saving) put_str(s, "SAVED");
         else if (n > 1) { char *e = put_str(s, PAGES[page].title); e = put_str(e, "  "); e = put_int(e, k); e = put_str(e, "/"); put_int(e, n); }
         else put_str(s, PAGES[page].title);
-        H->text(8, 82, 150, 0, s, saving ? C_YEL : C_GRAY, 0);
-        H->fill(8, 102, 224, 1, C_YDIM);
+        H->text(8, 82, 150, 0, s, saving ? C_VAL : C_HEAD, 0);
+        H->fill(8, 102, 224, 1, C_RULE);
         for (r = 0; r < 4; r++) shown.row[r] = -1;
         shown.page = page; shown.saved = saving;
     }
@@ -264,8 +337,17 @@ static void draw(uint32_t full)
         if (shown.row[r] != p || shown.val[r] != v) { draw_row(r); shown.row[r] = p; shown.val[r] = v; }
     }
     if (vm != shown.voices) {                   /* sex prickar: rösterna som låter */
-        for (r = 0; r < BRIS_NV; r++) H->fill(170 + r * 11, 86, 8, 8, vm >> r & 1u ? C_YEL : C_BAR0);
+        for (r = 0; r < BRIS_NV; r++) H->fill(170 + r * 11, 86, 8, 8, vm >> r & 1u ? C_VAL : C_TRACK);
         shown.voices = vm;
+    }
+    if (era != shown.era) {                     /* ERA uppe till höger: MODERN, TAPE nn, LOFI nn */
+        char s[16];
+        int32_t tw;
+        era_text(s);
+        tw = H->text_w(0, s);
+        H->fill(160, 28, 72, 16, C_BLACK);
+        H->text(232 - tw, 28, tw, 0, s, era > 0 ? C_VAL : C_LBL, 0);
+        shown.era = era;
     }
 }
 
@@ -275,13 +357,18 @@ static int init(const hb_host_t *h)
     settings_t s;
     H = h;
     saved_ms = 0;
+    c1_ok = HB_HOST_HAS(H, c1_wait);
     bris_init();
-    if (H->load(&s, sizeof s) == 0 && s.magic == SET_MAGIC && s.version == 1 && s.preset < BRIS_NPRESETS) {
+    sliten_init(&tape);
+    era = 0; tape_on = 0;
+    era_apply();
+    if (H->load(&s, sizeof s) == 0 && s.magic == SET_MAGIC && s.version == SET_VERSION && s.preset < BRIS_NPRESETS) {
         int i;
         preset = s.preset;
         page = s.page < NPAGES ? s.page : 0;
         for (i = 0; i < BP_N; i++) bris_set(i, s.p[i]);
         edited = s.edited;
+        set_era((int32_t)s.era);
     } else {
         load_preset(1);                         /* Poly Magic */
     }
@@ -294,6 +381,7 @@ static void release(void)
 {
     bris_all_notes_off();
     bris_reset();
+    sliten_reset(&tape);
 }
 
 HB_DESC = {HB_ABI, "BRIS", init, release, note, cc, render, ui, draw, 0, 0, 0, midi};

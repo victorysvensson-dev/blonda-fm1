@@ -5,10 +5,13 @@
 set -e
 cd "$(dirname "$0")/.."
 : "${FM1_DOCK:=../fm1-dock}"
+M=moduler/bris
+SRCS=$(sed -n 's/^sources = //p' $M/module.cfg | tr ' ' '\n' | sed "s#^#$M/#" | tr '\n' ' ')
+INCS=$(sed -n 's/^includes = //p' $M/module.cfg | tr ' ' '\n' | sed "s#^#-I$M/#" | tr '\n' ' ')
 clang --target=wasm32 -O2 -nostdlib -ffreestanding -fno-builtin -ffp-contract=off -Wall -Wno-unused-function \
-    -I"$FM1_DOCK/firmware/dock" -I"$FM1_DOCK/firmware/src" -I"$FM1_DOCK/firmware/gen" -Imoduler/bris/src \
+    -I"$FM1_DOCK/firmware/dock" -I"$FM1_DOCK/firmware/src" -I"$FM1_DOCK/firmware/gen" $INCS \
     -Wl,--no-entry -Wl,--strip-all -Wl,-z,stack-size=65536 -Wl,--initial-memory=1048576 \
-    -o web/bris.wasm gemensamt/wasm_host.c moduler/bris/bris_module.c moduler/bris/src/bris_fm1.c "$FM1_DOCK/modules/lib/hb_lib.c"
+    -o web/bris.wasm gemensamt/wasm_host.c $M/bris_module.c $SRCS "$FM1_DOCK/modules/lib/hb_lib.c"
 python3 - <<'PY'
 import base64
 b = base64.b64encode(open("web/bris.wasm", "rb").read()).decode()

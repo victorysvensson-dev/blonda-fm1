@@ -220,15 +220,22 @@ void bris_reset(void)
 }
 
 /* ------------------------------------------------------------------ ljud */
-static void render_block(float *L, float *R, uint32_t n)
-{
-    float lfo[BRIS_K], xL[BRIS_K], xR[BRIS_K];
-    float mw = g_mw, at = g_at, mwat = mw + at, bs = g_bend * C.bendr, me = 0.f;
-    float cdry = C.cdry, cwet = C.cwet;
-    uint32_t s, i, mask = 0;
+/* Ett anrop delas i tre pass så att rösterna kan räknas på två kärnor: LFO för hela anropet, rösterna (vilka som
+ * helst, i vilken ordning som helst: varje röst har sitt eget tillstånd och skriver till sin egen mix), sedan
+ * ensemble, eko och utgång. Blocken om BRIS_K räknas från anropets början, som förut. */
+static float lfo_all[BRIS_MAXN], mixL[2][BRIS_MAXN], mixR[2][BRIS_MAXN];
+static uint32_t call_n;
+static float call_mwat, call_bs, part_me[2];
+static uint32_t part_mask[2];
 
+void bris_render_begin(uint32_t n)
+{
+    uint32_t s;
+    call_n = n > BRIS_MAXN ? BRIS_MAXN : n;
+    call_mwat = g_mw + g_at;
+    call_bs = g_bend * C.bendr;
     /* LFO: triangel, ramp upp, ramp ned, fyrkant, sample & hold */
-    for (s = 0; s < n; s++) {
+    for (s = 0; s < call_n; s++) {
         float raw;
         lph += C.lrinc;
         if (lph >= 1.f) { lph -= ffloor(lph); lsh = noise(); }
@@ -240,11 +247,20 @@ static void render_block(float *L, float *R, uint32_t n)
         default: raw = lsh; break;
         }
         lsm += (raw - lsm) * lsmc;
-        lfo[s] = lsm;
-        xL[s] = xR[s] = 0.f;
+        lfo_all[s] = lsm;
+        mixL[0][s] = mixR[0][s] = mixL[1][s] = mixR[1][s] = 0.f;
     }
+    part_me[0] = part_me[1] = 0.f;
+    part_mask[0] = part_mask[1] = 0;
+}
 
-    for (i = 0; i < BRIS_NV; i++) {
+static void voices_block(uint32_t first, uint32_t last, const float *lfo, float *xL, float *xR, uint32_t n,
+                         float *mep, uint32_t *maskp)
+{
+    float mwat = call_mwat, bs = call_bs, me = *mep;
+    uint32_t s, i, mask = *maskp;
+
+    for (i = first; i < last; i++) {
         voice_t *v = &V[i];
         uint32_t t = vt[i];
         float g = vg[i];
@@ -362,6 +378,27 @@ static void render_block(float *L, float *R, uint32_t n)
         v->f1 = f1; v->f2 = f2; v->f3 = f3; v->f4 = f4;
         if (s2 > 0) { me = fmaxf_(me, e2); mask |= 1u << i; }
     }
+    *mep = me; *maskp = mask;
+}
+
+/* rösterna first..last-1 för hela anropet, till mix 0 eller 1 (1: andra kärnan) */
+void bris_render_voices(uint32_t first, uint32_t last, uint32_t mix)
+{
+    uint32_t off;
+    if (last > BRIS_NV) last = BRIS_NV;
+    mix &= 1u;
+    for (off = 0; off < call_n; off++) mixL[mix][off] = mixR[mix][off] = 0.f;   /* (en omkörning börjar om rent) */
+    part_me[mix] = 0.f; part_mask[mix] = 0;
+    for (off = 0; off < call_n; off += BRIS_K) {
+        uint32_t k = call_n - off < BRIS_K ? call_n - off : BRIS_K;
+        voices_block(first, last, lfo_all + off, mixL[mix] + off, mixR[mix] + off, k, &part_me[mix], &part_mask[mix]);
+    }
+}
+
+static void fx_block(float *L, float *R, const float *xL, const float *xR, uint32_t n)
+{
+    float cdry = C.cdry, cwet = C.cwet;
+    uint32_t s, i;
 
     /* stereoensemble: fyra fördröjningar, två per kanal; läspositionen interpoleras över blocket */
     {
@@ -423,14 +460,30 @@ static void render_block(float *L, float *R, uint32_t n)
             pk = fmaxf_(fmaxf_(fabsf_(dcyL), fabsf_(dcyR)), pk * 0.9997f);
         }
     }
-    m_env = me; m_mask = mask; m_peak = pk; m_lfo = lfo[n - 1];
+}
+
+/* mixarna ihop, sedan ensemble, eko och utgång till L och R (call_n sampel) */
+void bris_render_end(float *L, float *R)
+{
+    uint32_t off, s;
+    for (s = 0; s < call_n; s++) { mixL[0][s] += mixL[1][s]; mixR[0][s] += mixR[1][s]; }
+    for (off = 0; off < call_n; off += BRIS_K) {
+        uint32_t k = call_n - off < BRIS_K ? call_n - off : BRIS_K;
+        fx_block(L + off, R + off, mixL[0] + off, mixR[0] + off, k);
+    }
+    m_env = fmaxf_(part_me[0], part_me[1]);
+    m_mask = part_mask[0] | part_mask[1];
+    m_peak = pk;
+    if (call_n) m_lfo = lfo_all[call_n - 1];
 }
 
 void bris_render(float *L, float *R, uint32_t n)
 {
     while (n) {
-        uint32_t k = n < BRIS_K ? n : BRIS_K;
-        render_block(L, R, k);
+        uint32_t k = n < BRIS_MAXN ? n : BRIS_MAXN;
+        bris_render_begin(k);
+        bris_render_voices(0, BRIS_NV, 0);
+        bris_render_end(L, R);
         L += k; R += k; n -= k;
     }
 }

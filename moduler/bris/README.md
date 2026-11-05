@@ -29,9 +29,9 @@ Ljudet ska vara detsamma. Det bevisas mot blonda-motor, inte bara påstås:
 - **`test/modul_host.c`** – modulen körs oförändrad i en låtsas-FM-1 med fm1-dock:s eget typsnitt: skärmbilder,
   rattar, knappar, lysdioder, MIDI, alla 90 ljud hörs och ingen klippning, SAVE överlever en omstart.
 - **Lasten på chipet** – mäts av GitHub vid varje push: `bris.dock` byggs med JieLis kompilator, skickas in i
-  fm1-dock 0.7 på en emulerad FM-1 (fm1-emu) och spelar sex toner. Första mätningen: **39,3 % av ljudavbrottet,
-  0 överskridanden** (fm1-dock rekommenderar under 50 %), och ljudet kommer ut. Bygget fallerar över 50 %.
-  `test/cykler/kor.py` ger ett snabbare ungefär här på datorn (~34 %).
+  fm1-dock 0.7 på en emulerad FM-1 (fm1-emu) och spelar sex toner med ERA på TAPE (det tyngsta läget). Bygget
+  fallerar över 50 % av ljudavbrottet (fm1-dock:s råd) eller om ljudet uteblir. Första mätningen, en kärna och utan
+  ERA: 39,3 %. `test/cykler/kor.py` ger ett snabbare ungefär här på datorn.
 
 Allt körs med `./kolla.sh` här i mappen (sätt `BLONDA_MOTOR` och `FM1_DOCK` om de inte ligger bredvid `blonda-fm1`).
 Webbemulatorn i `web/` kör samma modul i webbläsaren.
@@ -44,10 +44,25 @@ Webbemulatorn i `web/` kör samma modul i webbläsaren.
 | PRESETS | byt ljud (laddas direkt) |
 | KNOB1–4 | de fyra parametrarna som visas |
 | SELECT | nästa / förra sidan |
-| ALGORITHM | vågform |
+| ALGORITHM | **ERA**: 0 MODERN (rent), 1–60 TAPE (kassett som slits mer och mer), 61–100 LOFI (färre bitar, lägre samplingsfrekvens). Visas uppe till höger på skärmen, sparas med SAVE, MIDI CC 77 |
 | SEL · EDIT · ENV · LFO · FX · GLO | FILTER · OSC · EG2/EG1 · LFO/LFO MOD · FX · VOICE/PLAY (tryck igen: andra halvan) |
 | SAVE | sparar ljudet; BRIS startar med det nästa gång |
 | HOME (håll) | fm1-dock:s väljare: byt till en annan modul |
+
+## ERA – inbyggt band och lofi
+
+ALGORITHM-ratten styr BLONDA SLITEN (samma effekt som Max for Live-pluggen, ur blonda-motor) efter BRIS:
+kassettläge med mer slitage, mättnad, brus och mörkare ton ju längre upp, och från 61 det digitala läget med
+färre bitar och lägre samplingsfrekvens. På 0 tonar bandet ut och slutar räknas, så BRIS låter exakt som förut.
+SLITEN ligger i `gemensamt/effekter/` så att fler moduler kan använda den, och testas mot blonda-motor i alla nio
+media (`gemensamt/test/sliten_test.py`). Skillnad mot pluggen: bandbufferten är kortare (modulens minne), så de
+digitala mediernas avbrott med upprepning används inte här.
+
+## Två kärnor
+
+Rösterna 3–5 räknas på FM-1:ans andra kärna när fm1-dock lånar ut den (`c1_run`), resten och effekterna på den
+första. Lånas den inte ut (de första ~0,75 s, eller en enhet som inte klarar kontrollen) räknas allt på kärna 0.
+Testet i låtsas-FM-1 visar att det låter likadant (skillnad under −100 dB).
 
 ## Filer
 
