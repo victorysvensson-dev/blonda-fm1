@@ -71,9 +71,19 @@ jobs:
             echo "== $n: fm1-dock:s logg och last"
             cat "../ut/emu-$n/log.txt" | tee -a "../ut/$n-last.txt"
             grep -E "render: " "../ut/emu-$n/log.txt" >> "$GITHUB_STEP_SUMMARY" || true
-            if [ -f "../ut/emu-$n/screen.png" ]; then
-              echo "== $n: skärmen i fm1-emu (base64)"; echo "SKARM-BORJAR"; base64 -w0 "../ut/emu-$n/screen.png"; echo; echo "SKARM-SLUTAR"
-            fi
+            ls "../ut/emu-$n"
+            for f in screen.png panel.png; do
+              if [ -f "../ut/emu-$n/$f" ]; then echo "BILD $f $(base64 -w0 "../ut/emu-$n/$f")"; break; fi
+            done
+            # ljudet: tyst innan tonerna (18 s), hörs efter
+            python3 - "../ut/emu-$n/audio.wav" <<'PY'
+          import sys, wave, array
+          w = wave.open(sys.argv[1]); sr = w.getframerate(); a = array.array("h", w.readframes(w.getnframes()))
+          def peak(t0, t1): return max((abs(x) for x in a[int(t0 * sr) * 2:int(t1 * sr) * 2]), default=0)
+          före, efter = peak(15.5, 17.8), peak(19, 25.5)
+          print(f"ljud i fm1-emu: topp före tonerna {före}, med sex toner {efter} (av 32767)")
+          sys.exit(0 if efter > 1000 else "inget ljud från modulen i fm1-emu")
+          PY
             # under hälften av ljudavbrottet, som fm1-dock rekommenderar
             python3 - "../ut/emu-$n/log.txt" <<'PY'
           import re, sys
