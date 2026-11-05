@@ -28,8 +28,10 @@ Ljudet ska vara detsamma. Det bevisas mot blonda-motor, inte bara påstås:
   ljudbyte och röstläge under spel, ekot ändras, ytterlägen, full volym.
 - **`test/modul_host.c`** – modulen körs oförändrad i en låtsas-FM-1 med fm1-dock:s eget typsnitt: skärmbilder,
   rattar, knappar, lysdioder, MIDI, alla 90 ljud hörs och ingen klippning, SAVE överlever en omstart.
-- **`test/cykler/kor.py`** – lasten på chipet, ungefär (RISC-V-emulator): ~34 % av ljudavbrottet med sex röster.
-  fm1-dock rekommenderar under 50 %. Den riktiga siffran mäts i fm1-emu när modulen byggs (se nedan).
+- **Lasten på chipet** – mäts av GitHub vid varje push: `bris.dock` byggs med JieLis kompilator, skickas in i
+  fm1-dock 0.7 på en emulerad FM-1 (fm1-emu) och spelar sex toner. Första mätningen: **39,3 % av ljudavbrottet,
+  0 överskridanden** (fm1-dock rekommenderar under 50 %), och ljudet kommer ut. Bygget fallerar över 50 %.
+  `test/cykler/kor.py` ger ett snabbare ungefär här på datorn (~34 %).
 
 Allt körs med `./kolla.sh` här i mappen (sätt `BLONDA_MOTOR` och `FM1_DOCK` om de inte ligger bredvid `blonda-fm1`).
 Webbemulatorn i `web/` kör samma modul i webbläsaren.
