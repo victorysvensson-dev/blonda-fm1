@@ -106,6 +106,36 @@ jobs:
           PY
           done
 
+      - name: Webbsidan med fm1-emu (riktig FM-1-emulator med fm1-dock och modulerna installerade)
+        run: |
+          rustup target add wasm32-unknown-unknown
+          bash fm1-emu/web/build.sh "$GITHUB_WORKSPACE/sida/fm1-emu" >/dev/null
+          cd fm1-dock
+          python3 - "$GITHUB_WORKSPACE/sida/fm1-emu" ../ut/*.dock <<'PY'
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "tools")
+          import hbmod, tryit
+          out = Path(sys.argv[1])
+          for d in sys.argv[2:]:
+              blob = Path(d).read_bytes()
+              n = Path(d).stem
+              (out / f"{n}.flash").write_bytes(tryit.sector_file(tryit.sectors_for(blob)))
+              (out / f"{n}.txt").write_text(tryit.script(hbmod.parse(blob)[0]["name"]))
+              print(n, "->", f"fm1-emu/?fw=fm1dock&flash={n}.flash&script={n}.txt")
+          PY
+          cd "$GITHUB_WORKSPACE/sida"
+          cat > index.html <<'HTML'
+          <!doctype html><meta charset="utf-8"><title>BLONDA FM-1</title>
+          <meta http-equiv="refresh" content="0; url=fm1-emu/?fw=fm1dock&flash=bris.flash&script=bris.txt">
+          <p><a href="fm1-emu/?fw=fm1dock&flash=bris.flash&script=bris.txt">BRIS på FM-1 (fm1-emu)</a></p>
+          HTML
+          ls -la "$GITHUB_WORKSPACE/sida" "$GITHUB_WORKSPACE/sida/fm1-emu" | head -40
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with: { path: sida }
+
       - name: Webbemulatorn
         run: |
           sudo apt-get install -y -qq lld >/dev/null
@@ -125,3 +155,19 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" ut/*.dock ut/emulator.html --repo "$GITHUB_REPOSITORY" \
             --title "BLONDA FM-1 $GITHUB_REF_NAME" --notes "BLONDAs moduler för M-VAVE FM-1 (fm1-dock). Webbemulatorn finns i emulator.html."
+
+  # GitHub Pages: fm1-emu med BRIS på https://victorysvensson-dev.github.io/blonda-fm1/
+  # (kräver att Pages är påslaget med källan "GitHub Actions" i repots inställningar)
+  sida:
+    needs: bygg
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
