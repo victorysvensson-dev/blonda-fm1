@@ -3,24 +3,22 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
 <style>
-/* Layout: ett instrument i trä och elfenben (gavlar i valnöt, tryckt panel, svart skärm), rattarna och knapparna
-   där FM-1 har dem, skalat som en helhet; kort text under på mörk bakgrund. Ett utseende, mörk sida. */
+/* Layout: ett instrument i kräm och mörkgrått (tryckt panel, svart skärm, elfenbens- och grafittangenter), rattarna
+   och knapparna där FM-1 har dem, skalat som en helhet; kort text under på mörk bakgrund. Ett utseende, mörk sida. */
 :root {
   color-scheme: dark;
-  --bg: #262522;          /* bordet */
+  --bg: #222326;          /* bordet */
   --fg: #ece6d6;          /* text på bordet */
   --fg-mute: #a39b88;
-  --panel: #e9e3d2;       /* panelens elfenben */
-  --panel-shade: #d8d0bb;
+  --panel: #efebe3;       /* panelens kräm */
+  --panel-shade: #e2ddd3;
   --ink: #2a2723;         /* tryck på panelen */
   --ink-mute: #7a7262;
-  --wood: #6b4529;        /* valnöt */
-  --wood-dark: #3f2717;
   --orange: #f26a2c;      /* signalfärgen */
   --orange-dim: #8a4a2c;
   --teal: #2f8f89;
   --ivory: #f5f0e2;       /* tangenter */
-  --ebony: #1f1d1a;
+  --ebony: #2a2c30;       /* grafit */
   --btn: #f0eadb;
   --f-label: "Barlow Condensed", "Arial Narrow", "Helvetica Neue", Arial, sans-serif;
   --f-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -45,11 +43,8 @@ h1 small { font-size: 15px; font-weight: 500; color: var(--orange); letter-spaci
 .panel {
   position: absolute; left: 0; top: 0; width: 960px; height: 580px; transform-origin: 0 0; transform: scale(var(--s, 1));
   border-radius: 14px; touch-action: none; user-select: none; -webkit-user-select: none;
-  background:
-    linear-gradient(90deg, var(--wood-dark) 0, var(--wood) 6px, #7d5534 14px, var(--wood) 22px, var(--wood-dark) 28px, transparent 28px,
-                    transparent calc(100% - 28px), var(--wood-dark) calc(100% - 28px), var(--wood) calc(100% - 22px), #7d5534 calc(100% - 14px), var(--wood) calc(100% - 6px), var(--wood-dark) 100%),
-    linear-gradient(180deg, #f1ecdd 0, var(--panel) 40%, var(--panel-shade) 100%);
-  box-shadow: 0 34px 60px -28px #000, inset 0 1px 0 #fff8;
+  background: linear-gradient(180deg, #f6f3ed 0, var(--panel) 40%, var(--panel-shade) 100%);
+  box-shadow: 0 34px 60px -28px #000, inset 0 0 0 2px #d6d0c4, inset 0 3px 0 #fff;
 }
 .lbl { position: absolute; font-family: var(--f-label); font-weight: 600; font-size: 15px; letter-spacing: .16em; color: var(--ink); transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
 .lbl.sub { font-size: 12px; font-weight: 500; color: var(--orange); top: 236px; letter-spacing: .14em; }
@@ -83,12 +78,12 @@ canvas#lcd { position: absolute; left: 14px; top: 14px; width: 240px; height: 24
 }
 .start span { display: block; font-size: 13px; color: var(--ivory); margin-top: 8px; letter-spacing: .12em; }
 
-.keys { position: absolute; left: 34px; top: 334px; width: 892px; height: 222px; border-radius: 8px; background: linear-gradient(180deg, #1a1816, #2a2622); box-shadow: inset 0 3px 8px #000a; }
+.keys { position: absolute; left: 34px; top: 334px; width: 892px; height: 222px; border-radius: 8px; background: linear-gradient(180deg, #2b2d31, #202226); box-shadow: inset 0 3px 8px #000a; }
 .key { position: absolute; border-radius: 24px; cursor: pointer; touch-action: none; }
 .key::after { content: ""; position: absolute; left: 50%; top: 20%; bottom: 20%; width: 3px; margin-left: -1.5px; border-radius: 2px; }
 .key.w { width: 48px; height: 104px; top: 108px; background: linear-gradient(180deg, var(--ivory), #e2dccb); box-shadow: 0 4px 0 #b8b19f, 0 6px 8px -3px #000a; }
 .key.w::after { background: #0000001c; }
-.key.b { width: 46px; height: 94px; top: 10px; background: linear-gradient(180deg, #34302b, var(--ebony)); box-shadow: 0 4px 0 #000, 0 6px 8px -3px #000c; }
+.key.b { width: 46px; height: 94px; top: 10px; background: linear-gradient(180deg, #3a3d42, #1c1e21); box-shadow: 0 4px 0 #000, 0 6px 8px -3px #000c; }
 .key.b::after { background: #ffffff14; }
 .key.on { background: var(--orange); box-shadow: 0 1px 0 #9c4119, 0 0 18px #f26a2c66; transform: translateY(3px); }
 .key.on::after { background: #0000002a; }
@@ -351,7 +346,7 @@ function audioOn(text) { $("st-audio").classList.add("on"); $("st-audio").lastCh
 // rattarna: svart kjol med räffling, lock i panelens färger (orange för KNOB1-4, petrol för ERA)
 function knobSvg(el, master) {
   const enc = el.dataset.enc, cap = enc >= "2" && enc <= "5" ? "#f26a2c" : enc === "1" ? "#2f8f89" : "#2a2622";
-  const line = cap === "#2a2622" ? "#ece6d6" : "#1f1d1a";
+  const line = cap === "#2a2c30" ? "#efebe3" : "#1f1d1a";
   let ticks = "";
   if (master) for (let i = 0; i <= 10; i++) {
     const a = (-135 + 27 * i) * Math.PI / 180, x1 = 29 + Math.sin(a) * 26, y1 = 29 - Math.cos(a) * 26, x2 = 29 + Math.sin(a) * 29, y2 = 29 - Math.cos(a) * 29;
