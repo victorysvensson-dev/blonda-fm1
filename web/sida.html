@@ -1,0 +1,489 @@
+<title>BRIS FM-1 Emulator</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DotGothic16&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
+<style>
+/* Layout: en instrumentpanel i samma läge som FM-1 (rattar vänster, skärm i mitten, rattar och knappar höger,
+   två rader tangenter under), skalad som en helhet till skärmens bredd; text kort under. */
+:root {
+  color-scheme: dark;
+  --bg: #0b0a07;          /* bordet */
+  --panel: #16140e;       /* panelens yta */
+  --panel-hi: #221f15;    /* kanter och upphöjt */
+  --rubber: #2a271d;      /* knappar och tangenter */
+  --ink: #e9e4d2;         /* text */
+  --mute: #8f8873;        /* etiketter */
+  --yel: #ffd600;         /* BLONDA-gult, samma som på skärmen */
+  --yel-dim: #5c4e05;     /* glöd */
+  --f-dot: "DotGothic16", "Courier New", ui-monospace, monospace;
+  --f-body: "Atkinson Hyperlegible", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+html, body { background: var(--bg); color: var(--ink); }
+body {
+  font-family: var(--f-body); font-size: 15px; line-height: 1.5;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 20px 40px;
+}
+.wrap { max-width: 1000px; margin: 0 auto; display: grid; gap: 20px; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 6px 20px; }
+h1 { font-family: var(--f-dot); font-weight: 400; font-size: 34px; letter-spacing: .06em; margin: 0; color: var(--yel); line-height: 1; }
+h1 small { font-size: 15px; color: var(--mute); letter-spacing: .12em; margin-left: 10px; }
+.status { font-family: var(--f-dot); font-size: 14px; letter-spacing: .08em; color: var(--mute); display: flex; gap: 14px; align-items: center; }
+.status .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yel-dim); display: inline-block; margin-right: 6px; vertical-align: 1px; }
+.status .on .dot { background: var(--yel); box-shadow: 0 0 8px var(--yel); }
+
+/* panelen: 960 x 580 punkter, skalas med --s */
+.stage { width: 100%; aspect-ratio: 960 / 580; max-width: 100%; position: relative; }
+.panel {
+  position: absolute; left: 0; top: 0; width: 960px; height: 580px; transform-origin: 0 0;
+  transform: scale(var(--s, 1)); background: var(--panel); border-radius: 46px;
+  box-shadow: inset 0 0 0 2px var(--panel-hi), 0 30px 60px -30px #000;
+  touch-action: none; user-select: none; -webkit-user-select: none;
+}
+.lbl { position: absolute; font-family: var(--f-dot); font-size: 14px; letter-spacing: .1em; color: var(--mute); transform: translateX(-50%); white-space: nowrap; pointer-events: none; }
+.brand { position: absolute; left: 584px; top: 272px; font-family: var(--f-dot); font-size: 13px; letter-spacing: .3em; color: var(--yel-dim); }
+
+.knob { position: absolute; width: 58px; height: 58px; margin: -29px 0 0 -29px; border-radius: 50%; cursor: ns-resize; outline: none; }
+.knob svg { width: 100%; height: 100%; display: block; }
+.knob:focus-visible { box-shadow: 0 0 0 3px var(--yel); }
+.knob.master { cursor: ns-resize; }
+
+.btn {
+  position: absolute; width: 52px; height: 50px; border-radius: 12px; background: var(--rubber); color: var(--mute);
+  font-family: var(--f-dot); font-size: 13px; letter-spacing: .06em; border: 0; padding: 14px 0 0; cursor: pointer;
+  box-shadow: inset 0 -3px 0 #0006, inset 0 1px 0 #ffffff10; touch-action: none;
+}
+.btn::before { content: ""; position: absolute; left: 50%; top: 7px; width: 6px; height: 6px; margin-left: -3px; border-radius: 50%; background: #0008; }
+.btn[data-led="2"]::before { background: var(--yel-dim); }
+.btn[data-led="1"]::before { background: var(--yel); box-shadow: 0 0 8px var(--yel); }
+.btn[data-led="1"] { color: var(--ink); }
+.btn.down { transform: translateY(1px); box-shadow: inset 0 1px 0 #0008; background: #24211a; }
+.btn:focus-visible { outline: 3px solid var(--yel); outline-offset: 2px; }
+.btn.oct { width: 74px; height: 40px; padding: 0; }
+.btn.oct::before { display: none; }
+
+.screen-bezel { position: absolute; left: 300px; top: 34px; width: 268px; height: 268px; border-radius: 26px; background: #000; box-shadow: inset 0 0 0 2px var(--panel-hi); }
+canvas#lcd { position: absolute; left: 14px; top: 14px; width: 240px; height: 240px; image-rendering: pixelated; border-radius: 4px; background: #000; }
+.start {
+  position: absolute; left: 14px; top: 14px; width: 240px; height: 240px; border: 0; border-radius: 4px; cursor: pointer;
+  background: #000c; color: var(--yel); font-family: var(--f-dot); font-size: 20px; letter-spacing: .1em; display: grid; place-items: center;
+}
+.start span { display: block; font-size: 13px; color: var(--mute); margin-top: 8px; letter-spacing: .08em; }
+
+.keys { position: absolute; left: 34px; top: 334px; width: 892px; height: 222px; border-radius: 28px; background: #0f0e0a; box-shadow: inset 0 0 0 2px #00000080; }
+.key { position: absolute; border-radius: 26px; background: var(--rubber); box-shadow: inset 0 -4px 0 #0007, inset 0 1px 0 #ffffff0d; cursor: pointer; touch-action: none; }
+.key::after { content: ""; position: absolute; left: 50%; top: 18%; bottom: 18%; width: 4px; margin-left: -2px; border-radius: 2px; background: #00000055; }
+.key.w { width: 48px; height: 104px; top: 108px; }
+.key.b { width: 46px; height: 94px; top: 10px; }
+.key.on { background: var(--yel); box-shadow: 0 0 18px #ffd60055; }
+.key.on::after { background: #0000002e; }
+
+.help { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 28px; }
+.help section { min-width: 0; }
+.help h2 { font-family: var(--f-dot); font-weight: 400; font-size: 15px; letter-spacing: .12em; color: var(--yel); margin: 0 0 6px; text-wrap: balance; }
+.help p, .help ul { margin: 0; color: var(--ink); max-width: 62ch; }
+.help ul { padding-left: 18px; }
+.help li { margin: 2px 0; }
+kbd { font-family: var(--f-dot); font-size: 13px; background: var(--rubber); color: var(--ink); border-radius: 5px; padding: 0 6px; }
+.note { color: var(--mute); font-size: 13px; }
+a { color: var(--yel); }
+@media (prefers-reduced-motion: reduce) { .key.on, .status .on .dot { box-shadow: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>BRIS<small>BLONDA · 6 RÖSTER · 90 LJUD</small></h1>
+    <div class="status" aria-live="polite">
+      <span id="st-audio"><i class="dot"></i>LJUD AV</span>
+      <span id="st-midi"><i class="dot"></i>MIDI</span>
+    </div>
+  </header>
+
+  <div class="stage" id="stage">
+    <div class="panel" id="panel">
+      <span class="lbl" style="left:80px;top:28px">MASTER</span>
+      <span class="lbl" style="left:190px;top:28px">SELECT</span>
+      <span class="lbl" style="left:80px;top:136px">PRESETS</span>
+      <span class="lbl" style="left:190px;top:136px">ALGORITHM</span>
+      <span class="lbl" style="left:630px;top:28px">KNOB1</span>
+      <span class="lbl" style="left:720px;top:28px">KNOB2</span>
+      <span class="lbl" style="left:810px;top:28px">KNOB3</span>
+      <span class="lbl" style="left:900px;top:28px">KNOB4</span>
+
+      <div class="knob master" id="k-master" style="left:80px;top:84px" tabindex="0" role="slider" aria-label="Master" aria-valuemin="0" aria-valuemax="100"></div>
+      <div class="knob" data-enc="0" style="left:190px;top:84px" tabindex="0" role="slider" aria-label="Select"></div>
+      <div class="knob" data-enc="6" style="left:80px;top:192px" tabindex="0" role="slider" aria-label="Presets"></div>
+      <div class="knob" data-enc="1" style="left:190px;top:192px" tabindex="0" role="slider" aria-label="Algorithm"></div>
+      <div class="knob" data-enc="2" style="left:630px;top:84px" tabindex="0" role="slider" aria-label="Knob 1"></div>
+      <div class="knob" data-enc="3" style="left:720px;top:84px" tabindex="0" role="slider" aria-label="Knob 2"></div>
+      <div class="knob" data-enc="4" style="left:810px;top:84px" tabindex="0" role="slider" aria-label="Knob 3"></div>
+      <div class="knob" data-enc="5" style="left:900px;top:84px" tabindex="0" role="slider" aria-label="Knob 4"></div>
+
+      <button class="btn oct" id="b-octm" style="left:42px;top:250px">OCT-</button>
+      <button class="btn oct" id="b-octp" style="left:124px;top:250px">OCT+</button>
+
+      <div class="screen-bezel">
+        <canvas id="lcd" width="240" height="240" aria-label="Skärmen"></canvas>
+        <button class="start" id="start">STARTA LJUDET<span>TRYCK HÄR, SEN SPELA</span></button>
+      </div>
+
+      <div id="btns"></div>
+      <span class="brand">BLONDA BRIS</span>
+
+      <div class="keys" id="keys"></div>
+    </div>
+  </div>
+
+  <div class="help">
+    <section>
+      <h2>SPELA</h2>
+      <ul>
+        <li>Klicka eller tryck på tangenterna, dra över dem för glissando.</li>
+        <li>Datorns tangentbord: <kbd>A</kbd>–<kbd>Ä</kbd> och raden ovanför. <kbd>Z</kbd> <kbd>X</kbd> byter oktav.</li>
+        <li>MIDI-keyboard i Chrome eller Edge: toner, böj, modhjul, tryck, sustain.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>RATTAR OCH KNAPPAR</h2>
+      <ul>
+        <li>Dra rattarna upp och ner, eller rulla. PRESETS byter ljud.</li>
+        <li>KNOB1–4 ändrar de fyra värdena på skärmen, SELECT bläddrar sidor.</li>
+        <li>SEL filter · EDIT osc · ENV höljen · LFO · FX · GLO röst. Tryck igen för andra halvan.</li>
+        <li>SAVE sparar ljudet i den här webbläsaren.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>SAMMA KOD SOM PÅ FM-1</h2>
+      <p>Skärmen, rattarna och ljudet kommer från exakt den modul som installeras på synthen, kompilerad till WebAssembly. Ljudet går i 44,1 kHz som på FM-1. Det som skiljer är själva panelen, och att styrkan här kommer från var du trycker: längre ner på tangenten spelar hårdare.</p>
+      <p class="note">Källkod och modulen för FM-1: <a href="https://github.com/victorysvensson-dev/blonda-fm1" target="_blank" rel="noopener">github.com/victorysvensson-dev/blonda-fm1</a></p>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+const WASM_B64 = "{{WASM_B64}}";
+const BTN = [ // id, label, x, y (som FM-1: FX SEL ENV LFO EDIT GLO / HOME SAVE ARP SEQ PLAY REC)
+  [2, "FX", 610, 150], [3, "SEL", 668, 150], [4, "ENV", 726, 150], [5, "LFO", 784, 150], [6, "EDIT", 842, 150], [7, "GLO", 900, 150],
+  [8, "HOME", 610, 212], [9, "SAVE", 668, 212], [10, "ARP", 726, 212], [11, "SEQ", 784, 212], [12, "PLAY", 842, 212], [13, "REC", 900, 212]];
+const STORE_KEY = "blonda-fm1-bris";
+const $ = (id) => document.getElementById(id);
+
+// ---------- wasm: en på sidan för skärmen innan ljudet startar (och som reserv), en i ljudtråden
+const wasmBytes = Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0));
+let main = null;            // { e, mem } på sidan
+let node = null;            // AudioWorkletNode
+let ctx = null, spn = null; // reserv: ScriptProcessor
+let started = false;
+
+function loadStore() {
+  try { const s = localStorage.getItem(STORE_KEY); return s ? Uint8Array.from(atob(s), (c) => c.charCodeAt(0)) : null; } catch (_) { return null; }
+}
+function saveStore(bytes) {
+  try { localStorage.setItem(STORE_KEY, btoa(String.fromCharCode(...bytes))); } catch (_) {}
+}
+async function makeInstance() {
+  const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+  const e = instance.exports;
+  const st = loadStore();
+  if (st && st.length <= 240) { new Uint8Array(e.memory.buffer, e.w_store(), st.length).set(st); e.w_store_set(st.length); }
+  e.w_init();
+  return e;
+}
+
+// ---------- skärmen och lysdioderna
+const lcd = $("lcd"), g2 = lcd.getContext("2d"), img = g2.createImageData(240, 240);
+function paint(fb) {
+  const d = img.data;
+  for (let i = 0, j = 0; i < 57600; i++, j += 4) {
+    const c = fb[i];
+    d[j] = (c >> 11) << 3 | (c >> 13); d[j + 1] = ((c >> 5) & 63) << 2 | ((c >> 9) & 3); d[j + 2] = (c & 31) << 3 | ((c >> 2) & 7); d[j + 3] = 255;
+  }
+  g2.putImageData(img, 0, 0);
+}
+const btnEls = {};
+function setLeds(leds) { for (const id in btnEls) btnEls[id].dataset.led = leds[id] || 0; }
+
+function pullMain(full) {   // bara när modulen körs på sidan
+  const e = main;
+  e.w_draw(performance.now() | 0, full ? 1 : 0);
+  if (e.w_dirty() || full) paint(new Uint16Array(e.memory.buffer, e.w_fb(), 57600));
+  setLeds(new Uint8Array(e.memory.buffer, e.w_leds(), 16));
+  if (e.w_saves() !== pullMain.saves) { pullMain.saves = e.w_saves(); if (e.w_store_n()) saveStore(new Uint8Array(e.memory.buffer, e.w_store(), e.w_store_n()).slice()); }
+}
+
+// ---------- händelser till modulen (i ljudtråden när den finns, annars på sidan)
+function send(msg) {
+  if (node) { node.port.postMessage(msg); return; }
+  if (!main) return;
+  const e = main;
+  switch (msg.t) {
+    case "key": e.w_key(msg.k, msg.v); break;
+    case "note": e.w_note(msg.n, msg.v); break;
+    case "midi": e.w_midi(msg.s, msg.a, msg.b); break;
+    case "btn": e.w_btn(msg.id, msg.d); break;
+    case "enc": e.w_enc(msg.id, msg.c); break;
+    case "oct": e.w_oct(msg.d); break;
+    case "master": e.w_master(msg.q); break;
+  }
+  pullMain(msg.t === "oct");
+}
+
+// ---------- ljudtråden
+const WORKLET = `
+class Bris extends AudioWorkletProcessor {
+  constructor(o) {
+    super();
+    this.q = []; this.e = null; this.n = 0; this.saves = 0;
+    const p = o.processorOptions;
+    WebAssembly.instantiate(p.wasm, {}).then(({ instance }) => {
+      const e = instance.exports;
+      if (p.store) { new Uint8Array(e.memory.buffer, e.w_store(), p.store.length).set(p.store); e.w_store_set(p.store.length); }
+      e.w_init(); e.w_master(p.master);
+      this.e = e; this.full = 1;
+      this.port.postMessage({ t: "ready" });
+    });
+    this.port.onmessage = (m) => this.q.push(m.data);
+  }
+  process(_, outs) {
+    const e = this.e, o = outs[0];
+    if (!e) return true;
+    for (const m of this.q) {
+      switch (m.t) {
+        case "key": e.w_key(m.k, m.v); break;
+        case "note": e.w_note(m.n, m.v); break;
+        case "midi": e.w_midi(m.s, m.a, m.b); break;
+        case "btn": e.w_btn(m.id, m.d); break;
+        case "enc": e.w_enc(m.id, m.c); break;
+        case "oct": e.w_oct(m.d); this.full = 1; break;
+        case "master": e.w_master(m.q); break;
+      }
+    }
+    if (this.q.length) { this.q.length = 0; this.n = 99; }
+    const n = o[0].length;
+    e.w_render(n);
+    o[0].set(new Float32Array(e.memory.buffer, e.w_outL(), n));
+    if (o[1]) o[1].set(new Float32Array(e.memory.buffer, e.w_outR(), n));
+    if (++this.n >= 8) {            /* skärmen ~ var 23:e ms, som fm1-dock:s huvudloop */
+      this.n = 0;
+      e.w_draw((currentTime * 1000) | 0, this.full);
+      const msg = { t: "ui", leds: new Uint8Array(e.memory.buffer, e.w_leds(), 16).slice() };
+      if (e.w_dirty() || this.full) msg.fb = new Uint16Array(e.memory.buffer, e.w_fb(), 57600).slice();
+      this.full = 0;
+      if (e.w_saves() !== this.saves) { this.saves = e.w_saves(); msg.store = new Uint8Array(e.memory.buffer, e.w_store(), e.w_store_n()).slice(); }
+      this.port.postMessage(msg, msg.fb ? [msg.fb.buffer] : []);
+    }
+    return true;
+  }
+}
+registerProcessor("bris", Bris);
+`;
+
+async function startAudio() {
+  if (started) return;
+  started = true;
+  $("start").hidden = true;
+  try {
+    try { ctx = new AudioContext({ sampleRate: 44100, latencyHint: "interactive" }); }
+    catch (_) { ctx = new AudioContext({ latencyHint: "interactive" }); }
+    await ctx.resume();
+    if (ctx.sampleRate !== 44100) throw new Error("rate");   // modulen räknar i 44,1 kHz
+    const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
+    await ctx.audioWorklet.addModule(url);
+    const store = loadStore();
+    node = new AudioWorkletNode(ctx, "bris", { numberOfInputs: 0, outputChannelCount: [2],
+      processorOptions: { wasm: wasmBytes.buffer.slice(0), store, master: masterQ12() } });
+    node.port.onmessage = (m) => {
+      const d = m.data;
+      if (d.t === "ui") { if (d.fb) paint(d.fb); setLeds(d.leds); if (d.store && d.store.length) saveStore(d.store); }
+    };
+    node.connect(ctx.destination);
+    audioOn("LJUD PÅ");
+  } catch (err) {
+    // reserv: modulen på sidan genom en ScriptProcessor (fungerar överallt, lite mer känslig för belastning)
+    node = null;
+    try {
+      if (ctx && ctx.sampleRate !== 44100) { try { ctx.close(); } catch (_) {} ctx = new AudioContext(); }
+      if (!ctx) ctx = new AudioContext();
+      await ctx.resume();
+      const e = main, ratio = 44100 / ctx.sampleRate;
+      spn = ctx.createScriptProcessor(1024, 0, 2);
+      let pos = 0, bufL = new Float32Array(0), bufR = new Float32Array(0);
+      spn.onaudioprocess = (ev) => {
+        const L = ev.outputBuffer.getChannelData(0), R = ev.outputBuffer.getChannelData(1), n = L.length;
+        const need = Math.ceil(n * ratio) + 2;
+        if (bufL.length < need + 512) { bufL = new Float32Array(need + 512); bufR = new Float32Array(need + 512); }
+        let have = 0;
+        while (have < need) { e.w_render(128); bufL.set(new Float32Array(e.memory.buffer, e.w_outL(), 128), have); bufR.set(new Float32Array(e.memory.buffer, e.w_outR(), 128), have); have += 128; }
+        for (let i = 0; i < n; i++) { const x = i * ratio, k = x | 0, f = x - k; L[i] = bufL[k] + (bufL[k + 1] - bufL[k]) * f; R[i] = bufR[k] + (bufR[k + 1] - bufR[k]) * f; }
+        pos += n;
+      };
+      spn.connect(ctx.destination);
+      setInterval(() => pullMain(false), 30);
+      audioOn(ctx.sampleRate === 44100 ? "LJUD PÅ" : "LJUD PÅ (" + Math.round(ctx.sampleRate / 100) / 10 + " kHz)");
+    } catch (e2) {
+      $("st-audio").lastChild.textContent = "LJUDET GICK INTE ATT STARTA";
+      started = false; $("start").hidden = false;
+    }
+  }
+}
+function audioOn(text) { $("st-audio").classList.add("on"); $("st-audio").lastChild.textContent = text; }
+
+// ---------- panelen: rattar
+function knobSvg(el, master) {
+  el.innerHTML = '<svg viewBox="0 0 58 58" aria-hidden="true"><circle cx="29" cy="29" r="27" fill="#0d0c08"/>' +
+    '<circle cx="29" cy="29" r="23" fill="#2c291f" stroke="#3a3628" stroke-width="2"/>' +
+    (master ? '<path d="M10 45 A23 23 0 1 1 48 45" fill="none" stroke="#5c4e05" stroke-width="3" stroke-linecap="round"/>' : "") +
+    '<g class="ind"><rect x="27.5" y="7" width="3" height="14" rx="1.5" fill="#ffd600"/></g></svg>';
+}
+let masterV = 0.8;
+const masterQ12 = () => Math.round(masterV * 4096);
+function setMaster(v) {
+  masterV = Math.min(1, Math.max(0, v));
+  const k = $("k-master");
+  k.querySelector(".ind").setAttribute("transform", `rotate(${-135 + 270 * masterV} 29 29)`);
+  k.setAttribute("aria-valuenow", Math.round(masterV * 100));
+  send({ t: "master", q: masterQ12() });
+}
+document.querySelectorAll(".knob").forEach((el) => {
+  const isMaster = el.id === "k-master", enc = +el.dataset.enc;
+  knobSvg(el, isMaster);
+  let ang = 0, acc = 0, y0 = 0, active = false;
+  const turn = (clicks) => {
+    if (!clicks) return;
+    if (isMaster) { setMaster(masterV + clicks * 0.02); return; }
+    ang += clicks * 15;
+    el.querySelector(".ind").setAttribute("transform", `rotate(${ang} 29 29)`);
+    send({ t: "enc", id: enc, c: clicks });
+  };
+  el.addEventListener("pointerdown", (ev) => { active = true; y0 = ev.clientY; acc = 0; el.setPointerCapture(ev.pointerId); el.focus({ preventScroll: true }); ev.preventDefault(); });
+  el.addEventListener("pointermove", (ev) => {
+    if (!active) return;
+    const s = parseFloat(getComputedStyle($("panel")).getPropertyValue("--s")) || 1;
+    acc += (y0 - ev.clientY) / s; y0 = ev.clientY;
+    const c = Math.trunc(acc / 7); if (c) { acc -= c * 7; turn(c); }
+  });
+  const end = () => { active = false; };
+  el.addEventListener("pointerup", end); el.addEventListener("pointercancel", end);
+  el.addEventListener("wheel", (ev) => { ev.preventDefault(); turn(ev.deltaY < 0 ? 1 : -1); }, { passive: false });
+  el.addEventListener("keydown", (ev) => {
+    const c = { ArrowUp: 1, ArrowRight: 1, ArrowDown: -1, ArrowLeft: -1, PageUp: 10, PageDown: -10 }[ev.key];
+    if (c) { ev.preventDefault(); turn(c); }
+  });
+});
+setMaster(masterV);
+
+// ---------- knappar
+function holdButton(el, onDown, onUp) {
+  const down = (ev) => { ev.preventDefault(); el.classList.add("down"); el.setPointerCapture?.(ev.pointerId); onDown(); };
+  const up = () => { if (!el.classList.contains("down")) return; el.classList.remove("down"); onUp && onUp(); };
+  el.addEventListener("pointerdown", down);
+  el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+  el.addEventListener("keydown", (ev) => { if ((ev.key === " " || ev.key === "Enter") && !ev.repeat) { ev.preventDefault(); el.classList.add("down"); onDown(); } });
+  el.addEventListener("keyup", (ev) => { if (ev.key === " " || ev.key === "Enter") up(); });
+}
+const btns = $("btns");
+for (const [id, label, x, y] of BTN) {
+  const b = document.createElement("button");
+  b.className = "btn"; b.textContent = label; b.style.left = (x - 26) + "px"; b.style.top = (y - 25) + "px";
+  b.setAttribute("aria-label", label);
+  btns.appendChild(b); btnEls[id] = b;
+  holdButton(b, () => send({ t: "btn", id, d: 1 }), () => send({ t: "btn", id, d: 0 }));
+}
+holdButton($("b-octm"), () => send({ t: "oct", d: -1 }));
+holdButton($("b-octp"), () => send({ t: "oct", d: 1 }));
+
+// ---------- tangenter: 0 = F3 .. 26 = G5, svarta i övre raden som på FM-1
+const keysEl = $("keys"), keyEls = [];
+(() => {
+  const WHITE_GAP = 54.5, X0 = 13;
+  const black = { 1: 0, 3: 1, 5: 2, 8: 4, 10: 5, 13: 7, 15: 8, 17: 9, 20: 11, 22: 12, 25: 14 }; // ton -> vit tangent till vänster
+  let w = 0;
+  for (let k = 0; k < 27; k++) {
+    const el = document.createElement("div");
+    el.dataset.k = k;
+    if (k in black) { el.className = "key b"; el.style.left = (X0 + black[k] * WHITE_GAP + (48 + WHITE_GAP) / 2 - 23) + "px"; }
+    else { el.className = "key w"; el.style.left = (X0 + w * WHITE_GAP) + "px"; w++; }
+    keysEl.appendChild(el); keyEls[k] = el;
+  }
+})();
+const held = new Map();            // pekare -> tangent
+const down = new Set();
+function keyOn(k, vel) {
+  if (!started) startAudio();
+  if (down.has(k)) return;
+  down.add(k); keyEls[k].classList.add("on"); send({ t: "key", k, v: vel });
+}
+function keyOff(k) { if (!down.delete(k)) return; keyEls[k].classList.remove("on"); send({ t: "key", k, v: 0 }); }
+function keyAt(ev) {
+  const el = document.elementFromPoint(ev.clientX, ev.clientY);
+  return el && el.classList.contains("key") ? +el.dataset.k : -1;
+}
+function velOf(ev, k) {   // längre ner på tangenten = hårdare
+  const r = keyEls[k].getBoundingClientRect();
+  return Math.max(30, Math.min(127, Math.round(40 + 87 * (ev.clientY - r.top) / r.height)));
+}
+keysEl.addEventListener("pointerdown", (ev) => {
+  const k = keyAt(ev); if (k < 0) return;
+  ev.preventDefault(); keysEl.setPointerCapture(ev.pointerId);
+  held.set(ev.pointerId, k); keyOn(k, velOf(ev, k));
+});
+keysEl.addEventListener("pointermove", (ev) => {
+  if (!held.has(ev.pointerId)) return;
+  const k = keyAt(ev), old = held.get(ev.pointerId);
+  if (k === old) return;
+  if (old >= 0) keyOff(old);
+  held.set(ev.pointerId, k);
+  if (k >= 0) keyOn(k, velOf(ev, k));
+});
+const release = (ev) => { if (!held.has(ev.pointerId)) return; const k = held.get(ev.pointerId); held.delete(ev.pointerId); if (k >= 0) keyOff(k); };
+keysEl.addEventListener("pointerup", release); keysEl.addEventListener("pointercancel", release);
+
+// datorns tangentbord: A = C4 (tangent 7) och uppåt, raden ovanför är de svarta
+const PC = { KeyA: 7, KeyW: 8, KeyS: 9, KeyE: 10, KeyD: 11, KeyF: 12, KeyT: 13, KeyG: 14, KeyY: 15, KeyH: 16, KeyU: 17, KeyJ: 18,
+             KeyK: 19, KeyO: 20, KeyL: 21, KeyP: 22, Semicolon: 23, Quote: 24, BracketRight: 25, Backslash: 26 };
+addEventListener("keydown", (ev) => {
+  if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.repeat) return;
+  if (document.activeElement && document.activeElement.classList.contains("knob") && /^Arrow|^Page/.test(ev.key)) return;
+  if (ev.code === "KeyZ") { send({ t: "oct", d: -1 }); return; }
+  if (ev.code === "KeyX") { send({ t: "oct", d: 1 }); return; }
+  if (ev.code in PC) { ev.preventDefault(); keyOn(PC[ev.code], 100); }
+});
+addEventListener("keyup", (ev) => { if (ev.code in PC) keyOff(PC[ev.code]); });
+addEventListener("blur", () => { for (const k of [...down]) keyOff(k); });
+
+// MIDI-keyboard
+(async () => {
+  if (!navigator.requestMIDIAccess) return;
+  try {
+    const acc = await navigator.requestMIDIAccess();
+    const hook = () => {
+      let n = 0;
+      acc.inputs.forEach((inp) => {
+        n++;
+        inp.onmidimessage = (m) => {
+          const [s, a = 0, b = 0] = m.data;
+          if (s >= 0xF0) return;
+          if (!started && (s & 0xF0) === 0x90) startAudio();
+          send({ t: "midi", s, a, b });
+        };
+      });
+      const el = $("st-midi");
+      el.classList.toggle("on", n > 0);
+      el.lastChild.textContent = n ? "MIDI ×" + n : "MIDI";
+    };
+    acc.onstatechange = hook; hook();
+  } catch (_) {}
+})();
+
+// ---------- skala panelen till sidan
+const stage = $("stage"), panel = $("panel");
+const fit = () => panel.style.setProperty("--s", (stage.clientWidth / 960).toFixed(4));
+new ResizeObserver(fit).observe(stage); fit();
+
+$("start").addEventListener("click", startAudio);
+
+// skärmen syns direkt, innan ljudet startar
+makeInstance().then((e) => { main = e; pullMain(true); });
+</script>

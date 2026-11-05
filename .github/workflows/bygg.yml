@@ -1,0 +1,91 @@
+# Bygger alla moduler i moduler/ till .dock för FM-1 på GitHubs servrar, där JieLis kompilator kan hämtas,
+# kör varje modul i fm1-emu med sex toner för att mäta lasten i ljudavbrottet, och bygger webbemulatorn.
+# Varje körning lämnar filerna som artefakt; en tagg (v*) gör ett släpp av .dock-filerna.
+name: bygg
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FM1_DOCK_REF: 94f8087ab62ea6c762cbb34747c8a01f02141a80   # joakimeriksson/fm1-dock, provad med
+  FM1_EMU_REF: 95343aa3b05fcbf443f553ef140e7bcd216ec264    # joakimeriksson/fm1-emu, provad med
+
+jobs:
+  bygg:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { path: blonda-fm1 }
+      - uses: actions/checkout@v4
+        with: { repository: joakimeriksson/fm1-dock, ref: '${{ env.FM1_DOCK_REF }}', path: fm1-dock }
+
+      - name: Modulerna i en låtsas-FM-1 (på datorn)
+        run: |
+          for m in blonda-fm1/moduler/*/; do
+            n=$(basename "$m")
+            if [ -f "$m/test/modul_host.c" ]; then
+              (cd "$m" && mkdir -p build/skarm \
+                && for f in src/*.c; do cc -std=c99 -O2 -Wall -Wextra -Werror -Wdouble-promotion -Wfloat-conversion -Isrc -c "$f" -o /dev/null; done \
+                && cc -std=gnu99 -O2 -Wall -Wno-unused-function -I"$GITHUB_WORKSPACE/fm1-dock/firmware/dock" \
+                   -I"$GITHUB_WORKSPACE/fm1-dock/firmware/src" -I"$GITHUB_WORKSPACE/fm1-dock/firmware/gen" -Isrc \
+                   test/modul_host.c ${n}_module.c src/*.c -o build/modul \
+                && build/modul build/skarm/s)
+            fi
+          done
+
+      - name: JieLis kompilator (pi32v2)
+        run: |
+          pip3 install --break-system-packages Pillow mido python-rtmidi
+          sh fm1-dock/tools/get_toolchain.sh
+
+      - name: Bygg .dock för varje modul
+        run: |
+          mkdir -p ut
+          cd fm1-dock
+          for m in ../blonda-fm1/moduler/*/; do
+            n=$(basename "$m")
+            JIELI_TOOLCHAIN=$HOME/.jieli/toolchain python3 tools/hbmod.py "$m"
+            python3 tools/hbmod.py --info "build/modules/$n.dock" | tee "../ut/$n-info.txt"
+            cp "build/modules/$n.dock" ../ut/
+          done
+
+      - name: Mät lasten i fm1-emu (sex toner)
+        continue-on-error: true          # första körningen: kontrollera att mätningen går som tänkt
+        run: |
+          git clone --depth 1 https://github.com/joakimeriksson/fm1-emu.git fm1-emu
+          git -C fm1-emu fetch --depth 1 origin "$FM1_EMU_REF" && git -C fm1-emu checkout "$FM1_EMU_REF"
+          cargo build --release --manifest-path fm1-emu/Cargo.toml -p fm1-live
+          cd fm1-dock
+          for d in ../ut/*.dock; do
+            n=$(basename "$d" .dock)
+            FM1_LIVE=../fm1-emu/target/release/fm1-live python3 tools/dock.py emu --fwsc docs/fm1-dock-0.7.fwsc \
+              --deploy "$d" --ms 9000 \
+              --keys "4000:m903064,4000:m903764,4000:m903c64,4000:m904064,4000:m904364,4000:m904864" \
+              --out "../ut/emu-$n" | tee "../ut/$n-last.txt"
+          done
+
+      - name: Webbemulatorn
+        run: |
+          sudo apt-get install -y -qq lld >/dev/null
+          FM1_DOCK=$GITHUB_WORKSPACE/fm1-dock sh blonda-fm1/web/bygg.sh
+          cp blonda-fm1/web/index.html ut/emulator.html
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blonda-fm1
+          path: |
+            ut/
+            blonda-fm1/moduler/*/build/skarm/*.ppm
+
+      - name: Släpp (bara för taggar)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env: { GH_TOKEN: '${{ github.token }}' }
+        run: |
+          gh release create "$GITHUB_REF_NAME" ut/*.dock ut/emulator.html --repo "$GITHUB_REPOSITORY" \
+            --title "BLONDA FM-1 $GITHUB_REF_NAME" --notes "BLONDAs moduler för M-VAVE FM-1 (fm1-dock). Webbemulatorn finns i emulator.html."

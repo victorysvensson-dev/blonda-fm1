@@ -1,0 +1,6 @@
+build/
+*.o
+*.elf
+moduler/*/test/cykler/*.bin
+web/*.wasm
+__pycache__/
