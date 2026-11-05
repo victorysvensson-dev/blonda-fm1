@@ -58,6 +58,7 @@ jobs:
       - name: Mät lasten i fm1-emu (sex toner)
         continue-on-error: true          # första körningen: kontrollera att mätningen går som tänkt
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libasound2-dev pkg-config >/dev/null
           git clone --depth 1 https://github.com/joakimeriksson/fm1-emu.git fm1-emu
           git -C fm1-emu fetch --depth 1 origin "$FM1_EMU_REF" && git -C fm1-emu checkout "$FM1_EMU_REF"
           cargo build --release --manifest-path fm1-emu/Cargo.toml -p fm1-live
@@ -68,6 +69,22 @@ jobs:
               --deploy "$d" --ms 9000 \
               --keys "4000:m903064,4000:m903764,4000:m903c64,4000:m904064,4000:m904364,4000:m904864" \
               --out "../ut/emu-$n" | tee "../ut/$n-last.txt"
+            echo "== $n: fm1-dock:s logg och last"
+            cat "../ut/emu-$n/log.txt" | tee -a "../ut/$n-last.txt"
+            grep -E "render: " "../ut/emu-$n/log.txt" >> "$GITHUB_STEP_SUMMARY" || true
+            if [ -f "../ut/emu-$n/screen.png" ]; then
+              echo "== $n: skärmen i fm1-emu (base64)"; echo "SKARM-BORJAR"; base64 -w0 "../ut/emu-$n/screen.png"; echo; echo "SKARM-SLUTAR"
+            fi
+            # under hälften av ljudavbrottet, som fm1-dock rekommenderar
+            python3 - "../ut/emu-$n/log.txt" <<'PY'
+          import re, sys
+          t = open(sys.argv[1]).read()
+          m = re.search(r"worst \d+ \(([\d.]+) %\), (\d+) overruns", t)
+          if not m: sys.exit("ingen lastmätning i loggen")
+          worst, over = float(m.group(1)), int(m.group(2))
+          print(f"värst {worst} % av ljudavbrottet, {over} överskridanden")
+          sys.exit(1 if worst > 50 or over else 0)
+          PY
           done
 
       - name: Webbemulatorn
