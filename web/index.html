@@ -485,5 +485,9 @@ new ResizeObserver(fit).observe(stage); fit();
 $("start").addEventListener("click", startAudio);
 
 // skärmen syns direkt, innan ljudet startar
-makeInstance().then((e) => { main = e; pullMain(true); });
+makeInstance().then((e) => { main = e; pullMain(true); }).catch(() => {
+  g2.fillStyle = "#000"; g2.fillRect(0, 0, 240, 240); g2.fillStyle = "#ffd600"; g2.font = "14px monospace";
+  g2.fillText("WEBBLÄSAREN KAN INTE", 20, 110); g2.fillText("KÖRA WEBASSEMBLY HÄR", 20, 130);
+  $("start").hidden = true;
+});
 </script>
