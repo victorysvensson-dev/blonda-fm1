@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Provar Pages-sidan (fm1-emu med fm1-dock och BRIS) i Chrome innan den publiceras: startar en lokal server för
 sida/, öppnar try-outen, väntar tills BRIS har startat och tar en skärmbild. Skärmbilden skrivs till loggen som
-base64 (rad som börjar med "BILD sida.png") och ut/sida.png.
+base64 i bitar (rader som börjar med "BILD") och ut/sida.jpg.
   python3 web/prova_fm1emu.py SIDA_MAPP UT_MAPP
 """
 import base64
@@ -37,10 +37,13 @@ with sync_playwright() as p:
         except Exception:
             pass
     pg.wait_for_timeout(15000)                   # fm1-dock startar, BRIS väljs (SELECT vid 1,5 s emulerad tid)
-    png = os.path.join(ut, "sida.png")
-    pg.screenshot(path=png)
+    png = os.path.join(ut, "sida.jpg")
+    pg.screenshot(path=png, type="jpeg", quality=70)
     print("text på sidan:", " ".join(pg.inner_text("body").split())[:400])
     print("konsolfel:", errs[:5])
-    print("BILD sida.png", base64.b64encode(open(png, "rb").read()).decode())
+    data = base64.b64encode(open(png, "rb").read()).decode()
+    for i in range(0, len(data), 16000):        # (loggen kortar långa rader)
+        print(f"BILD {i // 16000:03d} {data[i:i + 16000]}")
+    print("BILD slut")
     b.close()
 srv.shutdown()
