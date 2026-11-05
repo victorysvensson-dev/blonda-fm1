@@ -1,7 +1,8 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Webbemulatorns FM-1: fm1-dock:s hb_host_t i WebAssembly, med fm1-dock:s eget typsnitt (gfx.c).
- * En modul ur moduler/ (till exempel moduler/bris) länkas in och körs oförändrad, som på FM-1:
- * samma init, note, ui, render och draw. JavaScript-sidan anropar w_*-funktionerna nedan.
+ * En modul ur moduler/ (till exempel moduler/bris eller moduler/puls) länkas in och körs oförändrad, som på FM-1:
+ * samma init, note, ui, render och draw, och hela panelen som händelser för en modul med HB_F_PANEL.
+ * JavaScript-sidan anropar w_*-funktionerna nedan.
  *   web/bygg.sh  ->  web/<modul>.wasm */
 #include <stdint.h>
 #include "hb_module.h"
@@ -87,7 +88,10 @@ static const hb_host_t HOST = {
 
 extern const hb_module_t hb_module;
 
-/* värdens rad överst (som fm1-dock: modulens namn, oktaven) */
+/* modulen har hela panelen (HB_F_PANEL): tangenterna och OCT- / OCT+ blir händelser till den, som i fm1-dock */
+#define PANEL (hb_module.flags & HB_F_PANEL)
+
+/* värdens rad överst (som fm1-dock: modulens namn, oktaven när värden spelar tangenterna) */
 static int32_t oct;
 static void top(void)
 {
@@ -96,7 +100,7 @@ static void top(void)
     draw_text_box(8, 4, 120, &FONT_S, hb_module.name, RGB(150, 150, 150), 0);
     s[4] = oct < 0 ? '-' : oct > 0 ? '+' : ' ';
     s[5] = (char)('0' + (oct < 0 ? -oct : oct));
-    draw_text_box(160, 4, 72, &FONT_S, s, RGB(150, 150, 150), 2);
+    if (!PANEL) draw_text_box(160, 4, 72, &FONT_S, s, RGB(150, 150, 150), 2);
     h_fill(0, HB_TOP - 1, 240, 1, RGB(40, 40, 40));
 }
 
@@ -132,10 +136,12 @@ __attribute__((export_name("w_render"))) void w_render(uint32_t n)
 }
 __attribute__((export_name("w_outL"))) float *w_outL(void) { return outL; }
 __attribute__((export_name("w_outR"))) float *w_outR(void) { return outR; }
-/* en av panelens tangenter: k = 0 (F3) .. 26 (G5), oktaven från OCT- / OCT+ */
+/* en av panelens tangenter: k = 0 (F3) .. 26 (G5), vel 0 = släppt. Som ton (oktaven från OCT- / OCT+), eller som
+ * händelse när modulen har hela panelen */
 __attribute__((export_name("w_key"))) void w_key(uint32_t k, uint32_t vel)
 {
     int32_t n = 53 + (int32_t)k + 12 * oct;
+    if (PANEL) { hb_module.ui((vel ? HB_EV_KEY_DOWN : HB_EV_KEY_UP) | k, (int32_t)vel); return; }
     if (n >= 0 && n <= 127) hb_module.note(0, (uint32_t)n, vel);
 }
 __attribute__((export_name("w_note"))) void w_note(uint32_t n, uint32_t vel) { hb_module.note(0, n, vel); }
@@ -150,6 +156,12 @@ __attribute__((export_name("w_btn"))) void w_btn(uint32_t id, uint32_t down)
 __attribute__((export_name("w_enc"))) void w_enc(uint32_t id, int32_t clicks) { hb_module.ui(HB_EV_ENC | id, clicks); }
 __attribute__((export_name("w_oct"))) void w_oct(int32_t d)
 {
+    if (PANEL) {
+        uint32_t id = d < 0 ? HB_BTN_OCT_DOWN : HB_BTN_OCT_UP;
+        hb_module.ui(HB_EV_BTN_DOWN | id, 0);
+        hb_module.ui(HB_EV_BTN_UP | id, 0);
+        return;
+    }
     oct += d;
     oct = oct < -3 ? -3 : oct > 3 ? 3 : oct;
     top();
@@ -163,7 +175,8 @@ __attribute__((export_name("w_draw"))) void w_draw(uint32_t ms, uint32_t full)
 }
 __attribute__((export_name("w_dirty"))) uint32_t w_dirty(void) { uint32_t d = dirty; dirty = 0; return d; }
 __attribute__((export_name("w_fb"))) uint16_t *w_fb(void) { return fb; }
-__attribute__((export_name("w_leds"))) uint8_t *w_leds(void) { return leds; }
+__attribute__((export_name("w_leds"))) uint8_t *w_leds(void) { return leds; }     /* 64: knapparna, tangenterna från 14 */
+__attribute__((export_name("w_flags"))) uint32_t w_flags(void) { return hb_module.flags; }
 __attribute__((export_name("w_store"))) uint8_t *w_store(void) { return store; }
 __attribute__((export_name("w_store_n"))) uint32_t w_store_n(void) { return store_n; }
 __attribute__((export_name("w_store_set"))) void w_store_set(uint32_t n) { store_n = n <= 240u ? n : 0u; }

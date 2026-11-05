@@ -23,6 +23,9 @@ ha svar, kommentarer och dokumentation på svenska; kodnamn på engelska.
 6. **Två kärnor**: tunga motorer delar upp rösterna och räknar en del på kärna 1 med fm1-dock:s `c1_run` / `c1_wait`
    (se `moduler/bris`), med reserv på kärna 0 när den inte lånas ut.
 7. **GPL-3.0-only**, som fm1-dock och Felucca.
+8. **Webbemulatorn tar med alla moduler** (`web/bygg.sh` bygger varje mapp i `moduler/`, väljaren överst på sidan).
+   En modul med `HB_F_PANEL` (som PULS) får tangenterna och OCT-knapparna som händelser och tangenternas lysdioder
+   visas; lägg till modulens namn och rubrik i `INFO` och dess hjälptext (`data-mod`) i `web/sida.html`.
 
 ## Kommandon
 

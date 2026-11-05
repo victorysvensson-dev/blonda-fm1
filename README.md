@@ -6,6 +6,7 @@ fm1-dock installeras en gång på FM-1, och modulerna ligger sedan sida vid sida
 | Modul | Vad | Ljudet kommer från |
 |---|---|---|
 | [`moduler/bris`](moduler/bris) | BLONDA BRIS – sexstämmig analog poly efter GS Music Bree6, 90 ljud | `blonda-motor` (BRIS), testad mot den |
+| [`moduler/puls`](moduler/puls) | BLONDA PULS – trummaskin: åtta syntade trumljud, 16-stegssekvenser, sex mönster, 10 trumset | `blonda-motor` (PULS), testad mot den |
 
 Varje modul kan också provas i webbläsaren: `web/` kör exakt samma modulkod, kompilerad till WebAssembly, med en
 spelbar panel (tangenter, rattar, knappar, skärm, datorns tangentbord och MIDI-keyboard).

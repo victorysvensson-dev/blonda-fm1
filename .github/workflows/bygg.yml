@@ -57,7 +57,7 @@ jobs:
             cp "build/modules/$n.dock" ../ut/
           done
 
-      - name: Mät lasten i fm1-emu (sex toner, ERA på TAPE)   # modulen skickas in över MIDI, sedan CC 77 och tonerna
+      - name: Mät lasten i fm1-emu (sex toner, PLAY, ERA på TAPE)   # modulen skickas in över MIDI, sedan CC 77, PLAY och tonerna
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq libasound2-dev pkg-config >/dev/null
           git clone --depth 1 https://github.com/joakimeriksson/fm1-emu.git fm1-emu
@@ -70,7 +70,8 @@ jobs:
             done=$(python3 -c "import sys; sys.path.insert(0, 'tools'); import hbdeploy; print(int(hbdeploy.din_script(open('$d','rb').read(), 1000)[1]))")
             t_cc=$((done + 2000)); t_on=$((done + 3000)); t_end=$((done + 11000))
             echo "== $n: inskickad vid $done ms, toner vid $t_on ms"
-            keys="$t_cc:mB04D3C"; for nt in 30 37 3c 40 43 48; do keys="$keys,$t_on:m90${nt}64"; done
+            # PLAY (knapp 12) startar trummaskinens sekvenser; synthar bryr sig inte om den
+            keys="$t_cc:mB04D3C,$t_on:12"; for nt in 30 37 3c 40 43 48; do keys="$keys,$t_on:m90${nt}64"; done; keys="$keys,$((t_on + 60)):12^"
             FM1_LIVE=$GITHUB_WORKSPACE/fm1-emu/target/release/fm1-live python3 tools/dock.py emu --fwsc docs/fm1-dock-0.7.fwsc \
               --deploy "$d" --ms "$t_end" --keys "$keys" \
               --out "../ut/emu-$n" | tee "../ut/$n-last.txt"

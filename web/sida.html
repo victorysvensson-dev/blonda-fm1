@@ -1,4 +1,4 @@
-<title>BRIS FM-1 Emulator</title>
+<title>BLONDA FM-1 Emulator</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600&family=Atkinson+Hyperlegible:wght@400;700&display=swap">
@@ -87,6 +87,21 @@ canvas#lcd { position: absolute; left: 14px; top: 14px; width: 240px; height: 24
 .key.b::after { background: #ffffff14; }
 .key.on { background: var(--orange); box-shadow: 0 1px 0 #9c4119, 0 0 18px #f26a2c66; transform: translateY(3px); }
 .key.on::after { background: #0000002a; }
+/* tangenternas lysdioder (PULS: stegen och trumljuden) */
+.key::before { content: ""; position: absolute; left: 50%; top: 9px; width: 9px; height: 9px; margin-left: -4.5px; border-radius: 50%; display: none; }
+.key[data-led="1"]::before, .key[data-led="2"]::before { display: block; }
+.key[data-led="1"]::before { background: var(--orange); box-shadow: 0 0 9px var(--orange), 0 0 2px #fff8 inset; }
+.key[data-led="2"]::before { background: #f26a2c55; }
+.key.w[data-led="2"]::before { background: #d9a68a; }
+
+/* modulväljaren */
+.mods { display: inline-flex; gap: 0; border-radius: 8px; padding: 3px; background: #ffffff10; }
+.mods button { font-family: var(--f-label); font-weight: 600; font-size: 16px; letter-spacing: .16em; color: var(--fg-mute);
+  background: none; border: 0; border-radius: 6px; padding: 6px 16px; cursor: pointer; }
+.mods button[aria-selected="true"] { background: var(--panel); color: var(--ink); }
+.mods button:focus-visible { outline: 2px solid var(--orange); outline-offset: 2px; }
+.titlerow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 22px; }
+[data-mod][hidden] { display: none !important; }
 
 .help { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px 28px; }
 .help section { min-width: 0; }
@@ -102,7 +117,13 @@ a { color: var(--orange); }
 
 <div class="wrap">
   <header>
-    <h1>BRIS<small>BLONDA · 6 RÖSTER · 90 LJUD</small></h1>
+    <div class="titlerow">
+      <h1 id="title">BRIS<small>BLONDA · 6 RÖSTER · 90 LJUD</small></h1>
+      <div class="mods" role="tablist" aria-label="Modul">
+        <button role="tab" data-m="bris" aria-selected="true">BRIS</button>
+        <button role="tab" data-m="puls" aria-selected="false">PULS</button>
+      </div>
+    </div>
     <div class="status" aria-live="polite">
       <span id="st-audio"><i class="dot"></i>LJUD AV</span>
       <span id="st-midi"><i class="dot"></i>MIDI</span>
@@ -139,14 +160,41 @@ a { color: var(--orange); }
       </div>
 
       <div id="btns"></div>
-      <span class="brand">BLONDA <b>BRIS</b></span>
+      <span class="brand">BLONDA <b id="brand">BRIS</b></span>
       <span class="rule" style="left:34px;top:312px;width:892px"></span>
 
       <div class="keys" id="keys"></div>
     </div>
   </div>
 
-  <div class="help">
+  <div class="help" data-mod="puls" hidden>
+    <section>
+      <h2>TRUMMASKINEN</h2>
+      <ul>
+        <li><kbd>PLAY</kbd> eller mellanslag startar och stoppar. Mönster 1 har en takt från början.</li>
+        <li>De 16 vita tangenterna är stegen för trumljudet som är valt: tryck för att sätta eller ta bort ett slag. De lyser där det slår.</li>
+        <li>De åtta första svarta väljer och spelar trumljud: BD SD RS CP CH OH TOM CB.</li>
+        <li>FX · SEL · ENV · LFO · EDIT · GLO är mönster 1–6. Håll ett och tryck ett annat för att kopiera.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>RATTAR OCH KNAPPAR</h2>
+      <ul>
+        <li>KNOB1–4: trumljudets nivå, stämning, längd och karaktär. SELECT bläddrar till GLOBAL: tempo, swing, drivning, volym.</li>
+        <li>PRESETS byter trumset. ALGORITHM är ERA, som i BRIS.</li>
+        <li>OCT− / OCT+ (eller <kbd>Z</kbd> <kbd>X</kbd>): tempo −1 / +1.</li>
+        <li>REC spelar in det du spelar på närmaste steg. ARP sätter accenter. SEQ växlar till LIVE: alla tangenter spelar trumljud.</li>
+        <li>SAVE sparar trumset, mönster och tempo i den här webbläsaren.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>SAMMA KOD SOM PÅ FM-1</h2>
+      <p>Trummaskinen är exakt den modul som installeras på synthen, kompilerad till WebAssembly. Sekvensern går i ljudtråden och slagen hamnar på rätt sampel, som på FM-1. Ljudet är testat mot PULS i blonda-motor sampel för sampel.</p>
+      <p class="note">Källkod och modulen för FM-1: <a href="https://github.com/victorysvensson-dev/blonda-fm1" target="_blank" rel="noopener">github.com/victorysvensson-dev/blonda-fm1</a></p>
+    </section>
+  </div>
+
+  <div class="help" data-mod="bris">
     <section>
       <h2>SPELA</h2>
       <ul>
@@ -175,28 +223,39 @@ a { color: var(--orange); }
 
 <script>
 "use strict";
-const WASM_B64 = "{{WASM_B64}}";
+const MODULES = "{{MODULES}}";
+const INFO = {
+  bris: { title: 'BRIS<small>BLONDA · 6 RÖSTER · 90 LJUD</small>', brand: "BRIS" },
+  puls: { title: 'PULS<small>BLONDA · TRUMMASKIN · 8 TRUMLJUD · 16 STEG</small>', brand: "PULS" },
+};
 const BTN = [ // id, label, x, y (som FM-1: FX SEL ENV LFO EDIT GLO / HOME SAVE ARP SEQ PLAY REC)
   [2, "FX", 610, 150], [3, "SEL", 668, 150], [4, "ENV", 726, 150], [5, "LFO", 784, 150], [6, "EDIT", 842, 150], [7, "GLO", 900, 150],
   [8, "HOME", 610, 212], [9, "SAVE", 668, 212], [10, "ARP", 726, 212], [11, "SEQ", 784, 212], [12, "PLAY", 842, 212], [13, "REC", 900, 212]];
-const STORE_KEY = "blonda-fm1-bris";
+let mod = (() => {   // modulen: från adressen (#puls), annars den som valdes sist
+  const h = location.hash.slice(1);
+  if (h in MODULES) return h;
+  try { const m = localStorage.getItem("blonda-fm1-modul"); if (m in MODULES) return m; } catch (_) {}
+  return "bris";
+})();
+const storeKey = () => "blonda-fm1-" + mod;
 const $ = (id) => document.getElementById(id);
 
 // ---------- wasm: en på sidan för skärmen innan ljudet startar (och som reserv), en i ljudtråden
-const wasmBytes = Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0));
+const wasmCache = {};
+const wasmOf = (m) => wasmCache[m] || (wasmCache[m] = Uint8Array.from(atob(MODULES[m]), (c) => c.charCodeAt(0)));
 let main = null;            // { e, mem } på sidan
 let node = null;            // AudioWorkletNode
 let ctx = null, spn = null; // reserv: ScriptProcessor
 let started = false;
 
 function loadStore() {
-  try { const s = localStorage.getItem(STORE_KEY); return s ? Uint8Array.from(atob(s), (c) => c.charCodeAt(0)) : null; } catch (_) { return null; }
+  try { const s = localStorage.getItem(storeKey()); return s ? Uint8Array.from(atob(s), (c) => c.charCodeAt(0)) : null; } catch (_) { return null; }
 }
 function saveStore(bytes) {
-  try { localStorage.setItem(STORE_KEY, btoa(String.fromCharCode(...bytes))); } catch (_) {}
+  try { localStorage.setItem(storeKey(), btoa(String.fromCharCode(...bytes))); } catch (_) {}
 }
 async function makeInstance() {
-  const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+  const { instance } = await WebAssembly.instantiate(wasmOf(mod), {});
   const e = instance.exports;
   const st = loadStore();
   if (st && st.length <= 240) { new Uint8Array(e.memory.buffer, e.w_store(), st.length).set(st); e.w_store_set(st.length); }
@@ -215,13 +274,17 @@ function paint(fb) {
   g2.putImageData(img, 0, 0);
 }
 const btnEls = {};
-function setLeds(leds) { for (const id in btnEls) btnEls[id].dataset.led = leds[id] || 0; }
+let panelMode = false;      // modulen har hela panelen (PULS): tangenternas lysdioder visas
+function setLeds(leds) {
+  for (const id in btnEls) btnEls[id].dataset.led = leds[id] || 0;
+  for (let k = 0; k < 27; k++) keyEls[k].dataset.led = panelMode ? leds[14 + k] || 0 : 0;
+}
 
 function pullMain(full) {   // bara när modulen körs på sidan
   const e = main;
   e.w_draw(performance.now() | 0, full ? 1 : 0);
   if (e.w_dirty() || full) paint(new Uint16Array(e.memory.buffer, e.w_fb(), 57600));
-  setLeds(new Uint8Array(e.memory.buffer, e.w_leds(), 16));
+  setLeds(new Uint8Array(e.memory.buffer, e.w_leds(), 64));
   if (e.w_saves() !== pullMain.saves) { pullMain.saves = e.w_saves(); if (e.w_store_n()) saveStore(new Uint8Array(e.memory.buffer, e.w_store(), e.w_store_n()).slice()); }
 }
 
@@ -244,7 +307,7 @@ function send(msg) {
 
 // ---------- ljudtråden
 const WORKLET = `
-class Bris extends AudioWorkletProcessor {
+class Modul extends AudioWorkletProcessor {
   constructor(o) {
     super();
     this.q = []; this.e = null; this.n = 0; this.saves = 0;
@@ -280,7 +343,7 @@ class Bris extends AudioWorkletProcessor {
     if (++this.n >= 8) {            /* skärmen ~ var 23:e ms, som fm1-dock:s huvudloop */
       this.n = 0;
       e.w_draw((currentTime * 1000) | 0, this.full);
-      const msg = { t: "ui", leds: new Uint8Array(e.memory.buffer, e.w_leds(), 16).slice() };
+      const msg = { t: "ui", leds: new Uint8Array(e.memory.buffer, e.w_leds(), 64).slice() };
       if (e.w_dirty() || this.full) msg.fb = new Uint16Array(e.memory.buffer, e.w_fb(), 57600).slice();
       this.full = 0;
       if (e.w_saves() !== this.saves) { this.saves = e.w_saves(); msg.store = new Uint8Array(e.memory.buffer, e.w_store(), e.w_store_n()).slice(); }
@@ -289,7 +352,7 @@ class Bris extends AudioWorkletProcessor {
     return true;
   }
 }
-registerProcessor("bris", Bris);
+registerProcessor("fm1-modul", Modul);
 `;
 
 async function startAudio() {
@@ -303,14 +366,7 @@ async function startAudio() {
     if (ctx.sampleRate !== 44100) throw new Error("rate");   // modulen räknar i 44,1 kHz
     const url = URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" }));
     await ctx.audioWorklet.addModule(url);
-    const store = loadStore();
-    node = new AudioWorkletNode(ctx, "bris", { numberOfInputs: 0, outputChannelCount: [2],
-      processorOptions: { wasm: wasmBytes.buffer.slice(0), store, master: masterQ12() } });
-    node.port.onmessage = (m) => {
-      const d = m.data;
-      if (d.t === "ui") { if (d.fb) paint(d.fb); setLeds(d.leds); if (d.store && d.store.length) saveStore(d.store); }
-    };
-    node.connect(ctx.destination);
+    makeNode();
     audioOn("LJUD PÅ");
   } catch (err) {
     // reserv: modulen på sidan genom en ScriptProcessor (fungerar överallt, lite mer känslig för belastning)
@@ -319,7 +375,7 @@ async function startAudio() {
       if (ctx && ctx.sampleRate !== 44100) { try { ctx.close(); } catch (_) {} ctx = new AudioContext(); }
       if (!ctx) ctx = new AudioContext();
       await ctx.resume();
-      const e = main, ratio = 44100 / ctx.sampleRate;
+      const ratio = 44100 / ctx.sampleRate;
       spn = ctx.createScriptProcessor(1024, 0, 2);
       let pos = 0, bufL = new Float32Array(0), bufR = new Float32Array(0);
       spn.onaudioprocess = (ev) => {
@@ -327,6 +383,7 @@ async function startAudio() {
         const need = Math.ceil(n * ratio) + 2;
         if (bufL.length < need + 512) { bufL = new Float32Array(need + 512); bufR = new Float32Array(need + 512); }
         let have = 0;
+        const e = main;
         while (have < need) { e.w_render(128); bufL.set(new Float32Array(e.memory.buffer, e.w_outL(), 128), have); bufR.set(new Float32Array(e.memory.buffer, e.w_outR(), 128), have); have += 128; }
         for (let i = 0; i < n; i++) { const x = i * ratio, k = x | 0, f = x - k; L[i] = bufL[k] + (bufL[k + 1] - bufL[k]) * f; R[i] = bufR[k] + (bufR[k + 1] - bufR[k]) * f; }
         pos += n;
@@ -339,6 +396,20 @@ async function startAudio() {
       started = false; $("start").hidden = false;
     }
   }
+}
+// modulen i ljudtråden (en ny nod när man byter modul)
+function makeNode() {
+  if (node) { try { node.disconnect(); node.port.onmessage = null; } catch (_) {} }
+  node = new AudioWorkletNode(ctx, "fm1-modul", { numberOfInputs: 0, outputChannelCount: [2],
+    processorOptions: { wasm: wasmOf(mod).buffer.slice(0), store: loadStore(), master: masterQ12() } });
+  const mine = mod;
+  node.port.onmessage = (m) => {
+    const d = m.data;
+    if (mine !== mod) return;
+    if (d.t === "ui") { if (d.fb) paint(d.fb); setLeds(d.leds); if (d.store && d.store.length) saveStore(d.store); }
+  };
+  node.connect(ctx.destination);
+  if (window.__tap) { node.connect(window.__tap); }
 }
 function audioOn(text) { $("st-audio").classList.add("on"); $("st-audio").lastChild.textContent = text; }
 
@@ -466,6 +537,9 @@ const PC = { KeyA: 7, KeyW: 8, KeyS: 9, KeyE: 10, KeyD: 11, KeyF: 12, KeyT: 13, 
 addEventListener("keydown", (ev) => {
   if (ev.metaKey || ev.ctrlKey || ev.altKey || ev.repeat) return;
   if (document.activeElement && document.activeElement.classList.contains("knob") && /^Arrow|^Page/.test(ev.key)) return;
+  if (ev.code === "Space" && !(document.activeElement && (document.activeElement.classList.contains("btn") || /INPUT|TEXTAREA/.test(document.activeElement.tagName)))) {
+    ev.preventDefault(); if (!started) startAudio(); send({ t: "btn", id: 12, d: 1 }); send({ t: "btn", id: 12, d: 0 }); return;
+  }
   if (ev.code === "KeyZ") { send({ t: "oct", d: -1 }); return; }
   if (ev.code === "KeyX") { send({ t: "oct", d: 1 }); return; }
   if (ev.code in PC) { ev.preventDefault(); keyOn(PC[ev.code], 100); }
@@ -504,8 +578,29 @@ new ResizeObserver(fit).observe(stage); fit();
 
 $("start").addEventListener("click", startAudio);
 
+// ---------- modulväljaren
+function showModule() {
+  $("title").innerHTML = INFO[mod].title;
+  $("brand").textContent = INFO[mod].brand;
+  document.querySelectorAll(".mods button").forEach((b) => b.setAttribute("aria-selected", b.dataset.m === mod ? "true" : "false"));
+  document.querySelectorAll("[data-mod]").forEach((el) => { el.hidden = el.dataset.mod !== mod; });
+}
+async function switchModule(m) {
+  if (m === mod || !(m in MODULES)) return;
+  for (const k of [...down]) keyOff(k);
+  mod = m;
+  try { localStorage.setItem("blonda-fm1-modul", m); } catch (_) {}
+  history.replaceState(null, "", "#" + m);
+  showModule();
+  const e = await makeInstance();
+  main = e; panelMode = !!(e.w_flags() & 2); pullMain(true);
+  if (node && ctx) makeNode();
+}
+document.querySelectorAll(".mods button").forEach((b) => b.addEventListener("click", () => { b.blur(); switchModule(b.dataset.m); }));
+showModule();
+
 // skärmen syns direkt, innan ljudet startar
-makeInstance().then((e) => { main = e; pullMain(true); }).catch(() => {
+makeInstance().then((e) => { main = e; panelMode = !!(e.w_flags() & 2); pullMain(true); }).catch(() => {
   g2.fillStyle = "#000"; g2.fillRect(0, 0, 240, 240); g2.fillStyle = "#ffd600"; g2.font = "14px monospace";
   g2.fillText("WEBBLÄSAREN KAN INTE", 20, 110); g2.fillText("KÖRA WEBASSEMBLY HÄR", 20, 130);
   $("start").hidden = true;
