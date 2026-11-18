@@ -121,6 +121,7 @@ a { color: var(--orange); }
       <h1 id="title">BRIS<small>BLONDA · 6 RÖSTER · 90 LJUD</small></h1>
       <div class="mods" role="tablist" aria-label="Modul">
         <button role="tab" data-m="bris" aria-selected="true">BRIS</button>
+        <button role="tab" data-m="one" aria-selected="false">ONE</button>
         <button role="tab" data-m="puls" aria-selected="false">PULS</button>
       </div>
     </div>
@@ -194,6 +195,32 @@ a { color: var(--orange); }
     </section>
   </div>
 
+  <div class="help" data-mod="one" hidden>
+    <section>
+      <h2>BRIS MÖTER MOOG</h2>
+      <ul>
+        <li>Tre oscillatorer per röst: triangel, såg eller puls, i fotlägen från 32' till 2'. Oscillator 2 och 3 kan stämmas i halvtoner och finstämmas mot den första.</li>
+        <li>Mixern driver filtret: DRIVE på filtersidan går från rent till mättat. Resonansen tunnar ut basen, och på fullt självsvänger filtret.</li>
+        <li>Från BRIS: sex röster med poly, mono och unison, LFO, två höljen, ensemble och eko.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>RATTAR OCH KNAPPAR</h2>
+      <ul>
+        <li>Spela på tangenterna, datorns tangentbord (<kbd>A</kbd>–<kbd>Ä</kbd>, <kbd>Z</kbd> <kbd>X</kbd> byter oktav) eller ett MIDI-keyboard. PRESETS byter ljud.</li>
+        <li>KNOB1–4 ändrar de fyra värdena på skärmen, SELECT bläddrar sidor.</li>
+        <li>SEL filter och tangenter · EDIT oscillator 1, 2, 3 och mixer · ENV höljen · LFO · FX · GLO röst. Tryck igen för nästa sida.</li>
+        <li>ALGORITHM är ERA, som i BRIS: från MODERN (rent) via TAPE till LOFI.</li>
+        <li>SAVE sparar ljudet i den här webbläsaren.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>SAMMA KOD SOM PÅ FM-1</h2>
+      <p>Skärmen, rattarna och ljudet kommer från exakt den modul som installeras på synthen, kompilerad till WebAssembly. Ljudet går i 44,1 kHz som på FM-1 och är testat mot ONE i blonda-motor. Versionen står överst på skärmen.</p>
+      <p class="note">Källkod och modulen för FM-1: <a href="https://github.com/victorysvensson-dev/blonda-fm1" target="_blank" rel="noopener">github.com/victorysvensson-dev/blonda-fm1</a></p>
+    </section>
+  </div>
+
   <div class="help" data-mod="bris">
     <section>
       <h2>SPELA</h2>
@@ -226,6 +253,7 @@ a { color: var(--orange); }
 const MODULES = "{{MODULES}}";
 const INFO = {
   bris: { title: 'BRIS<small>BLONDA · 6 RÖSTER · 90 LJUD</small>', brand: "BRIS" },
+  one: { title: 'ONE<small>BLONDA · BRIS MÖTER MOOG · 6 RÖSTER · 49 LJUD</small>', brand: "ONE" },
   puls: { title: 'PULS<small>BLONDA · TRUMMASKIN · 8 TRUMLJUD · 16 STEG</small>', brand: "PULS" },
 };
 const BTN = [ // id, label, x, y (som FM-1: FX SEL ENV LFO EDIT GLO / HOME SAVE ARP SEQ PLAY REC)

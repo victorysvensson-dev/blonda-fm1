@@ -1,0 +1,311 @@
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* En låtsas-FM-1 för ONE-modulen: fm1-dock:s hb_host_t på datorn, med fm1-dock:s egna typsnitt (gfx.c).
+ * Modulen (moduler/one/one_module.c) körs oförändrad: init, rattar, knappar, toner, render och draw, som
+ * fm1-dock anropar dem. Ut kommer skärmbilder (PPM) och ljudet som modulen lämnar till värden (WAV, Q15).
+ *   cc -O2 -I$FM1_DOCK/firmware/dock -I$FM1_DOCK/firmware/src -I$FM1_DOCK/firmware/gen -Isrc \
+ *      test/modul_host.c one_module.c src/one_fm1.c -o build/one-modul   (i moduler/one)
+ *   build/one-modul build/skarm      -> build/skarm-NN.ppm, build/skarm.wav, och kontroller (felkod vid fel) */
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include "hb_module.h"
+#include "one_presets.h"
+
+/* ---- skärmen: 240 x 240 RGB565, som panelen får den (gfx.c skickar byten omvända) */
+static uint16_t fb[240 * 240];
+static void lcd_sync(void) {}
+static void lcd_blit(uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint16_t *px)
+{
+    uint32_t i, j;
+    for (j = 0; j < h; j++)
+        for (i = 0; i < w; i++)
+            if (x + i < 240u && y + j < 240u) {
+                uint16_t c = px[j * w + i];
+                fb[(y + j) * 240u + x + i] = (uint16_t)(c >> 8 | c << 8);
+            }
+}
+#define CV_MAX (240u * 96u)
+#include "gfx.c"
+
+static void h_fill(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
+{
+    int32_t i, j;
+    for (j = y; j < y + h; j++)
+        for (i = x; i < x + w; i++)
+            if (i >= 0 && i < 240 && j >= 0 && j < 240) fb[j * 240 + i] = c;
+}
+static int bad_draw;
+static void h_text(int32_t x, int32_t y, int32_t w, uint32_t big, const char *s, uint16_t fg, uint32_t center)
+{
+    const felucca_font_t *f = big ? &FONT_L : &FONT_S;
+    if (x < 0 || y < 0 || w <= 0 || x + w > 240 || y + (int32_t)f->h > 240) { bad_draw++; return; }
+    if (y < HB_TOP) bad_draw++;
+    draw_text_box((uint32_t)x, (uint32_t)y, (uint32_t)w, f, s, fg, center ? 1 : 0);
+}
+static void h_cv_begin(int32_t w, int32_t h, uint16_t bg) { cv_begin((uint32_t)w, (uint32_t)h, bg); }
+static void h_cv_pixel(int32_t x, int32_t y, uint16_t c) { cv_pset(x, y, c); }
+static void h_cv_text(int32_t x, int32_t y, uint32_t big, const char *s, uint16_t fg) { cv_text(x, y, big ? &FONT_L : &FONT_S, s, fg); }
+static void h_cv_blit(int32_t x, int32_t y) { cv_blit((uint32_t)x, (uint32_t)y); }
+static int32_t h_text_w(uint32_t big, const char *s) { return text_w(big ? &FONT_L : &FONT_S, s); }
+
+/* ---- resten av värden */
+static uint32_t now_ms;
+static uint32_t h_ms(void) { return now_ms; }
+static uint32_t h_ticks(void) { return now_ms * 24000u; }
+static void h_log(const char *s) { printf("  log: %s\n", s); }
+static void h_log_u32(const char *s, uint32_t v) { printf("  log: %s%08x\n", s, v); }
+static uint32_t leds[64];
+static void h_led(uint32_t id, uint32_t on) { if (id < 64u) leds[id] = on; }
+static uint32_t h_rand(void) { return (uint32_t)rand(); }
+static uint8_t store[240];
+static uint32_t store_n;
+static int h_load(void *p, uint32_t n) { if (!store_n || n > store_n) return -1; memcpy(p, store, n); return 0; }
+static void h_save(const void *p, uint32_t n) { if (n <= 240u) { memcpy(store, p, n); store_n = n; } else bad_draw += 1000; }
+static void h_midi_send(uint32_t st, uint32_t d1, uint32_t d2) { (void)st; (void)d1; (void)d2; }
+static uint32_t h_master(void) { return 4096u; }
+
+/* den andra kärnan: kör jobbet direkt (samma resultat som parallellt, rösterna delar inget tillstånd) */
+static int c1_lend = 1, c1_jobs;
+static int h_c1_run(void (*fn)(uint32_t), uint32_t arg) { if (!c1_lend) return 0; fn(arg); c1_jobs++; return 1; }
+static int h_c1_wait(void) { return 0; }
+
+static const hb_host_t HOST = {
+    .abi = HB_ABI, .size = sizeof(hb_host_t), .ms = h_ms, .ticks = h_ticks, .log = h_log, .log_u32 = h_log_u32,
+    .fill = h_fill, .text = h_text, .cv_begin = h_cv_begin, .cv_rect = cv_rect, .cv_line = cv_line, .cv_pixel = h_cv_pixel,
+    .cv_text = h_cv_text, .cv_blit = h_cv_blit, .led = h_led, .rand = h_rand, .load = h_load, .save = h_save,
+    .midi_send = h_midi_send, .master = h_master, .text_w = h_text_w, .c1_run = h_c1_run, .c1_wait = h_c1_wait,
+};
+
+extern const hb_module_t hb_module;
+static const hb_module_t *M = &hb_module;
+
+static void shot(const char *base, int n)
+{
+    char path[512];
+    FILE *f;
+    int i;
+    snprintf(path, sizeof path, "%s-%02d.ppm", base, n);
+    f = fopen(path, "wb");
+    fprintf(f, "P6\n240 240\n255\n");
+    for (i = 0; i < 240 * 240; i++) {
+        uint16_t c = fb[i];
+        unsigned char rgb[3] = {(unsigned char)((c >> 11) << 3), (unsigned char)(((c >> 5) & 63) << 2), (unsigned char)((c & 31) << 3)};
+        fwrite(rgb, 1, 3, f);
+    }
+    fclose(f);
+}
+
+/* ljud: block om 256 sampel, som ljudavbrottet */
+static int16_t *wav;
+static int wav_n, wav_cap, clipped;
+static int32_t peak;
+static void audio(int ms)
+{
+    int blocks = ms * 44100 / 1000 / 256, b, i;
+    for (b = 0; b < blocks; b++) {
+        int32_t out[512] = {0};
+        M->render(out, 256);
+        for (i = 0; i < 512; i++) {
+            int32_t v = out[i];
+            if (v > 32767 || v < -32767) clipped++;
+            if (v > peak) peak = v;
+            if (-v > peak) peak = -v;
+            if (wav_n >= wav_cap) { wav_cap = wav_cap ? wav_cap * 2 : 1 << 20; wav = realloc(wav, (size_t)wav_cap * 2); }
+            wav[wav_n++] = (int16_t)(v > 32767 ? 32767 : v < -32767 ? -32767 : v);
+        }
+        now_ms += 6;
+        if (b % 3 == 0) M->draw(0);
+    }
+}
+static void write_wav(const char *path)
+{
+    FILE *f = fopen(path, "wb");
+    uint32_t ds = (uint32_t)wav_n * 2, rs = 36 + ds, sr = 44100, br = 44100 * 4, fl = 16;
+    uint16_t fmt = 1, ch = 2, ba = 4, bits = 16;
+    fwrite("RIFF", 1, 4, f); fwrite(&rs, 4, 1, f); fwrite("WAVEfmt ", 1, 8, f); fwrite(&fl, 4, 1, f);
+    fwrite(&fmt, 2, 1, f); fwrite(&ch, 2, 1, f); fwrite(&sr, 4, 1, f); fwrite(&br, 4, 1, f); fwrite(&ba, 2, 1, f);
+    fwrite(&bits, 2, 1, f); fwrite("data", 1, 4, f); fwrite(&ds, 4, 1, f); fwrite(wav, 2, (size_t)wav_n, f);
+    fclose(f);
+}
+
+static int fails;
+#define CHECK(c, msg) do { if (!(c)) { printf("FEL: %s\n", msg); fails++; } else printf("ok: %s\n", msg); } while (0)
+
+static void enc(uint32_t e, int32_t c) { M->ui(HB_EV_ENC | e, c); }
+static void btn(uint32_t b) { M->ui(HB_EV_BTN_DOWN | b, 0); M->ui(HB_EV_BTN_UP | b, 0); }
+
+int main(int argc, char **argv)
+{
+    const char *base = argc > 1 ? argv[1] : "build/skarm";
+    const char *base_name = base;
+    char wpath[512];
+    int n = 0;
+    uint32_t i;
+    int32_t peak_quiet;
+
+    palette_set(0);
+    CHECK(M->abi == HB_ABI && !strcmp(M->name, "ONE"), "beskrivningen: ABI och namn");
+    CHECK(M->init(&HOST) == 0, "init");
+    M->draw(1);
+    shot(base, n++);                            /* 00: start, one */
+
+    M->note(0, 60, 100); M->note(0, 64, 90); M->note(0, 67, 80);
+    audio(600);
+    shot(base, n++);                            /* 01: tre röster låter */
+    CHECK(peak > 1000, "ljud kommer ut när tre toner spelas");
+    M->note(0, 60, 0); M->note(0, 64, 0); M->note(0, 67, 0);
+    audio(3000);
+    peak_quiet = 0;
+    {
+        int32_t out[512] = {0};
+        M->render(out, 256);
+        for (i = 0; i < 512; i++) if (abs(out[i]) > peak_quiet) peak_quiet = abs(out[i]);
+    }
+    CHECK(peak_quiet < 50, "tyst igen efter släpp och eko");
+
+    enc(HB_ENC_PRESETS, 1);                     /* moogbas */
+    M->draw(0);
+    shot(base, n++);                            /* 02 */
+    enc(HB_ENC_KNOB1, -5); enc(HB_ENC_KNOB4, 30);    /* filtersidan visas från start */
+    M->note(0, 36, 120); audio(800); M->note(0, 36, 0); audio(400);
+    M->draw(0);
+    shot(base, n++);                            /* 03: filtersidan, ändrat (*): cutoff ner, drive upp */
+    btn(HB_BTN_SEL); M->draw(0); shot(base, n++);    /* 04: KEYS (SEL igen: sidans andra halva) */
+    btn(HB_BTN_EDIT); M->draw(0); shot(base, n++);   /* 05: OSC 1 */
+    CHECK(leds[HB_BTN_EDIT] == 1u && leds[HB_BTN_SEL] == 2u, "lysdioderna visar sidan");
+    btn(HB_BTN_EDIT); enc(HB_ENC_KNOB1, 1); enc(HB_ENC_KNOB3, 25); M->draw(0); shot(base, n++);   /* 06: OSC 2, puls, finstämd */
+    btn(HB_BTN_EDIT); enc(HB_ENC_KNOB2, 3); M->draw(0); shot(base, n++);   /* 07: OSC 3, fotläge upp */
+    btn(HB_BTN_EDIT); enc(HB_ENC_KNOB1, 7); enc(HB_ENC_KNOB2, -5); enc(HB_ENC_KNOB3, 40); M->draw(0); shot(base, n++);   /* 08: MIX */
+    btn(HB_BTN_EDIT); M->draw(0);                    /* runt till OSC 1 igen */
+    M->note(0, 48, 110); audio(500); M->note(0, 48, 0); audio(300);
+    btn(HB_BTN_ENV); M->draw(0); shot(base, n++);    /* 09: EG2 */
+    btn(HB_BTN_ENV); M->draw(0); shot(base, n++);    /* 10: EG1 */
+    btn(HB_BTN_LFO); M->draw(0); shot(base, n++);    /* 11 */
+    btn(HB_BTN_LFO); M->draw(0); shot(base, n++);    /* 12 */
+    btn(HB_BTN_FX); M->draw(0); shot(base, n++);     /* 13 */
+    btn(HB_BTN_GLO); M->draw(0); shot(base, n++);    /* 14: VOICE */
+
+    for (i = 0; i < 200; i++) enc(HB_ENC_PRESETS, 1);   /* runt och runt */
+    for (i = 0; i < 200; i++) enc(HB_ENC_KNOB1 + (i & 3u), (int32_t)(i % 7u) - 3);
+    for (i = 0; i < 40; i++) enc(HB_ENC_SELECT, 1);
+    M->draw(1);
+    CHECK(bad_draw == 0, "allt ritas inom skärmen och under värdens rad");
+
+    /* alla ljud: spelar utan att klippa eller tystna */
+    {
+        int p, silent = 0, clip0 = clipped;
+        for (p = 0; p < ONE_NPRESETS; p++) {
+            M->midi(0xC0, (uint32_t)p, 0);
+            peak = 0;
+            M->note(0, 48, 110); M->note(0, 60, 100); M->note(0, 67, 100);
+            audio(300);
+            M->note(0, 48, 0); M->note(0, 60, 0); M->note(0, 67, 0);
+            if (peak < 300) { printf("  tyst: ljud %d\n", p); silent++; }
+            M->midi(0xB0, 123, 0);
+            audio(30);
+        }
+        CHECK(silent == 0, "alla ljud hörs");
+        CHECK(clipped == clip0, "inget ljud går över full nivå");
+    }
+
+    /* MIDI: böj, modhjul, tryck, sustain, program change */
+    M->midi(0xC0, 22, 0);                       /* sträv lead */
+    M->midi(0x90, 62, 100); M->midi(0xE0, 0, 127); M->midi(0xB0, 1, 127); M->midi(0xD0, 100, 0); audio(400);
+    M->midi(0xE0, 0, 0); M->midi(0xB0, 64, 127); M->midi(0x80, 62, 0); audio(300);
+    M->midi(0xB0, 64, 0); M->midi(0xE0, 0, 64); M->midi(0xB0, 1, 0); M->midi(0xD0, 0, 0); audio(1500);
+    CHECK(1, "MIDI-meddelanden tas emot utan krasch");
+
+    /* ERA (ALGORITHM): MODERN -> TAPE -> LOFI ändrar ljudet, hörs, klipper inte, och 0 är helt rent igen
+     * (efter en stund utan toner: ONE ensam blir helt tyst, med bandet kvar hörs brus) */
+    {
+        static int32_t keep[3][256 * 2 * 40];
+        int32_t pk[3], quiet[3], i2, clip0 = clipped;
+        const int32_t steg[3] = {-100, 35, 50};      /* MODERN, TAPE 35, LOFI 85 */
+        int k, b;
+        M->midi(0xC0, 1, 0);                         /* one */
+        for (k = 0; k < 3; k++) {
+            int32_t out[512];
+            enc(HB_ENC_ALGORITHM, steg[k]);
+            M->midi(0xB0, 123, 0);
+            for (b = 0; b < 300; b++) { memset(out, 0, sizeof out); M->render(out, 256); }
+            M->note(0, 57, 100); M->note(0, 64, 100);
+            pk[k] = 0;
+            for (b = 0; b < 40; b++) {
+                int32_t *o = keep[k] + b * 512;
+                memset(o, 0, 512 * 4); M->render(o, 256);
+                for (i2 = 0; i2 < 512; i2++) { if (o[i2] > 32767 || o[i2] < -32767) clipped++; if (abs(o[i2]) > pk[k]) pk[k] = abs(o[i2]); }
+            }
+            M->note(0, 57, 0); M->note(0, 64, 0);
+            if (k) { M->draw(0); shot(base_name, n++); }   /* 15: TAPE 35, 16: LOFI 85 */
+            for (b = 0; b < 1200; b++) { memset(out, 0, sizeof out); M->render(out, 256); }   /* ~7 s: eko och hölje klingar ut */
+            quiet[k] = 0;
+            for (b = 0; b < 80; b++) { memset(out, 0, sizeof out); M->render(out, 256); for (i2 = 0; i2 < 512; i2++) if (abs(out[i2]) > quiet[k]) quiet[k] = abs(out[i2]); }
+        }
+        {
+            double d1 = 0, d2 = 0, e0 = 0;
+            for (i2 = 0; i2 < 256 * 2 * 40; i2++) {
+                double a0 = keep[0][i2];
+                e0 += a0 * a0;
+                d1 += (a0 - keep[1][i2]) * (a0 - keep[1][i2]);
+                d2 += (a0 - keep[2][i2]) * (a0 - keep[2][i2]);
+            }
+            printf("  ERA: topp MODERN %d, TAPE %d, LOFI %d; skillnad mot rent: TAPE %.1f dB, LOFI %.1f dB; tystnad efteråt: %d, %d, %d\n",
+                   pk[0], pk[1], pk[2], 10 * log10(d1 / e0 + 1e-30), 10 * log10(d2 / e0 + 1e-30), quiet[0], quiet[1], quiet[2]);
+            CHECK(10 * log10(d1 / e0 + 1e-30) > -20 && 10 * log10(d2 / e0 + 1e-30) > -20, "ERA: TAPE och LOFI låter annorlunda än rent");
+            CHECK(pk[1] > 1000 && pk[2] > 1000 && clipped == clip0, "ERA: hörs och klipper inte");
+            CHECK(quiet[1] > 0, "ERA TAPE: bandbruset hörs i tystnaden");
+        }
+        {   /* tillbaka till 0: bandet tonar ut och slutar räknas, tyst som ONE ensam */
+            int32_t out[512], q = 0;
+            enc(HB_ENC_ALGORITHM, -100);
+            for (b = 0; b < 400; b++) { memset(out, 0, sizeof out); M->render(out, 256); }
+            for (b = 0; b < 80; b++) { memset(out, 0, sizeof out); M->render(out, 256); for (i2 = 0; i2 < 512; i2++) if (abs(out[i2]) > q) q = abs(out[i2]); }
+            CHECK(quiet[0] == 0 && q == 0, "ERA tillbaka på MODERN: helt rent och tyst igen");
+        }
+    }
+
+    /* två kärnor: samma ljud som allt på en kärna (summan av rösterna i en annan ordning: avrundning bara) */
+    {
+        static int32_t one[2][256 * 2 * 60];
+        int pass, b, i2;
+        double e = 0, d = 0;
+        for (pass = 0; pass < 2; pass++) {
+            c1_lend = pass == 0;
+            M->release(); M->init(&HOST);
+            M->midi(0xC0, 1, 0);
+            M->note(0, 48, 100); M->note(0, 55, 100); M->note(0, 60, 100); M->note(0, 64, 100); M->note(0, 67, 100); M->note(0, 72, 100);
+            for (b = 0; b < 60; b++) { memset(one[pass] + b * 512, 0, 512 * 4); M->render(one[pass] + b * 512, 256); }
+        }
+        c1_lend = 1;
+        for (i2 = 0; i2 < 256 * 2 * 60; i2++) { e += (double)one[0][i2] * one[0][i2]; d += (double)(one[0][i2] - one[1][i2]) * (one[0][i2] - one[1][i2]); }
+        printf("  två kärnor: %d jobb, skillnad mot en kärna %.1f dB\n", c1_jobs, 10 * log10(d / (e + 1e-30) + 1e-30));
+        CHECK(c1_jobs > 0 && 10 * log10(d / (e + 1e-30) + 1e-30) < -80, "två kärnor låter som en");
+        M->midi(0xB0, 123, 0);
+    }
+
+    /* SAVE: sparas och kommer tillbaka vid nästa start */
+    M->midi(0xC0, 7, 0);
+    btn(HB_BTN_SEL); enc(HB_ENC_KNOB1, -15);
+    enc(HB_ENC_ALGORITHM, 30);                  /* TAPE 30 sparas med ljudet */
+    btn(HB_BTN_SAVE);
+    now_ms += 10; M->draw(0); shot(base, n++);  /* 17: SAVED */
+    CHECK(store_n > 0 && store_n <= 240u, "inställningarna ryms i modulens 240 byte");
+    {
+        float e; memcpy(&e, store + store_n - 4, 4);
+        printf("  sparat: %u byte, era %.1f\n", store_n, (double)e);
+        CHECK(e == 30.f, "ERA sparas med ljudet (TAPE 30)");
+    }
+    M->release();
+    CHECK(M->init(&HOST) == 0, "ny start");
+    M->draw(1); shot(base, n++);                /* 18: samma ljud, ändrat (*), TAPE 30 */
+    now_ms += 2000; M->draw(0);
+
+    snprintf(wpath, sizeof wpath, "%s.wav", base);
+    write_wav(wpath);
+    printf("%d skärmbilder, ljud i %s\n", n, wpath);
+    if (fails) { printf("%d kontroller misslyckades\n", fails); return 1; }
+    printf("alla kontroller ok\n");
+    return 0;
+}
