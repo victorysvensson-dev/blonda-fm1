@@ -1,8 +1,8 @@
 # BLONDA ONE för M-VAVE FM-1
 
 BLONDA ONE är en synth med två ljudmotorer, som modul för [fm1-dock](https://github.com/joakimeriksson/fm1-dock) på
-M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.3 (står överst på skärmen, efter
-motorns namn: `3 OSC V2.3` eller `BRIS V2.3`).
+M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.4 (står överst på skärmen, efter
+motorns namn: `3 OSC V2.4` eller `BRIS V2.4`).
 
 Skärmen är BLONDAs: en gul prickdisplay. Ljudets namn står i prickar i ett fönster med svaga prickar bakom, som
 displayen i BLONDAs pluggar och SEQ.3, och rattarnas värden visas som rader av prickar. Färgerna är BLONDAs (gult
@@ -193,6 +193,9 @@ färre bitar och lägre samplingsfrekvens. På 0 tonar bandet ut och slutar räk
 SLITEN ligger i `gemensamt/effekter/` så att fler moduler kan använda den, och testas mot blonda-motor i alla nio
 media (`gemensamt/test/sliten_test.py`). Skillnad mot pluggen: bandbufferten är kortare (modulens minne), så de
 digitala mediernas avbrott med upprepning används inte här.
+
+Bandbruset är lågt (version 2.4): utan toner omkring -78 dBFS på TAPE 10 och -65 dBFS på TAPE 60. SLITEN är
+densamma som i blonda-motor; det är ONE:s ratt som ställer bruset lägre än pluggens standard.
 
 ## Två kärnor
 
