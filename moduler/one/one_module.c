@@ -43,7 +43,7 @@
 #ifndef HB_F_MIDI_RT
 #define HB_F_MIDI_RT 16u                        /* nyare fm1-dock: MIDI-klockan kommer i ljudavbrottet (annars huvudloopen) */
 #endif
-#define ONE_VERSION "V2.3"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
+#define ONE_VERSION "V2.4"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
 
 static const hb_host_t *H;
 static char *put_int(char *s, int32_t v);
@@ -267,7 +267,8 @@ static void era_apply(void)
         sliten_set(&tape, SL_wow, 0.35f);
         sliten_set(&tape, SL_flut, 0.3f);
         sliten_set(&tape, SL_sat, 0.3f + 0.4f * t);
-        sliten_set(&tape, SL_brus, 0.15f + 0.35f * t);
+        sliten_set(&tape, SL_brus, 0.03f + 0.07f * t);   /* bandbrus: lågt (2.4; förut 0,15-0,5, ett högt brus
+                                                 * utan toner), 14 dB lägre: -78 till -65 dBFS RMS utan toner */
         sliten_set(&tape, SL_avbr, 0.15f * t * t);
         sliten_set(&tape, SL_ton, 0.62f - 0.25f * t);
     } else {                                    /* LOFI: digitalt, färre bitar och lägre samplingsfrekvens */
