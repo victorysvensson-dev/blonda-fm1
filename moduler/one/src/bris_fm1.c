@@ -441,7 +441,9 @@ void bris_set(int i, float x)
     if (i == BP_lage) {
         int m = ifloor(x + 0.5f);
         m = m < 0 ? 0 : m > 3 ? 3 : m;
-        if (m != mode_) { bris_all_notes_off(); mode_ = m; }
+        /* (läget först: tonerna kan slås an från ljudavbrottet mitt i det här, och en ton som kommer emellan ska
+         * tystas av raden efter, inte bli kvar i ett läge som inte längre gäller) */
+        if (m != mode_) { mode_ = m; bris_all_notes_off(); }
     } else if (i == BP_uniint) {
         uni_ = ifloor(x + 0.5f);
         if (mode_ == 3 && mono_on) play_stack(0);

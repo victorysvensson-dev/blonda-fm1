@@ -3,7 +3,8 @@
 # Allt som ska vara grönt innan BLONDA ONE (moduler/one) lämnas över: bygger testverktygen på datorn och kör
 #   1. fabriksljuden mot blonda-motor, båda motorerna (likhet.py)   2. scenarier mot blonda-motor (scenarier.py)
 #   3. SLITEN (ERA), 4. RUM (reverbet) och PUMP mot blonda-motor
-#   5. modulen i en låtsas-FM-1 (skärm, knappar, MIDI, motorbyte)   6. last och minne på chipet, ungefär (cykler/kor.py)
+#   5. ARP och SEQ, och modulen i en låtsas-FM-1 (skärm, knappar, MIDI, motorbyte)
+#   6. last och minne på chipet, ungefär (cykler/kor.py)
 # Kräver: blonda-motor (BLONDA_MOTOR, byggd med cmake) och fm1-dock (FM1_DOCK). Steg 6 kräver clang, lld, unicorn.
 set -e
 cd "$(dirname "$0")"
@@ -22,7 +23,7 @@ fi
 [ -x "$BLONDA_MOTOR/build/blonda-render" ] || { cmake -S "$BLONDA_MOTOR" -B "$BLONDA_MOTOR/build" -DCMAKE_BUILD_TYPE=Release >/dev/null && cmake --build "$BLONDA_MOTOR/build" -j4 >/dev/null; }
 
 W="-std=c99 -O2 -Wall -Wextra -Werror -Wdouble-promotion -Wfloat-conversion"
-for f in one_fm1 bris_fm1 bfx_fm1; do cc $W -Isrc -c src/$f.c -o build/$f.o; done
+for f in one_fm1 bris_fm1 bfx_fm1 spel_fm1; do cc $W -Isrc -c src/$f.c -o build/$f.o; done
 MI="-I$BLONDA_MOTOR/include -I$BLONDA_MOTOR/motorer"
 cc -std=c99 -O2 -Isrc -o build/one-render test/render.c build/one_fm1.o build/bfx_fm1.o
 cc -std=c99 -O2 -Isrc -o build/bris-render test/bris/render.c build/bris_fm1.o build/bfx_fm1.o
@@ -54,7 +55,9 @@ python3 ../../gemensamt/test/rum_test.py | tail -1
 cc -std=c99 -O2 -Wall -I../../gemensamt -I../../gemensamt/effekter ../../gemensamt/test/pump_test.c ../../gemensamt/effekter/pump_fm1.c \
     -o ../../build/pump-test -lm
 ../../build/pump-test | tail -1
-echo "== 5. modulen i en låtsas-FM-1"
+echo "== 5. ARP och SEQ för sig (ordning, takt, inspelning), sedan modulen i en låtsas-FM-1"
+cc -std=c99 -O2 -Wall -Wextra -Werror -Isrc test/spel_test.c build/spel_fm1.o -o build/spel-test -lm
+build/spel-test | tail -1
 build/one-modul build/skarm/s | tail -1
 if command -v clang >/dev/null && command -v ld.lld >/dev/null && python3 -c "import unicorn" 2>/dev/null; then
     echo "== 6. last och minne på chipet (uppskattning)"

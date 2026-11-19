@@ -34,7 +34,9 @@ ha svar, kommentarer och dokumentation på svenska; kodnamn på engelska.
    blonda-motor) och BRIS (`src/bris_fm1.c`), med gemensam ensemble, eko och utgång (`src/bfx_fm1.c`). Varje ljud
    hör till en motor; modulen byter motor med ljudet. En ny motor från blonda-motor läggs till på samma sätt
    (tabellen `ENGINES` och ljudens ordning i `one_module.c`), inte som en egen modul, och testas mot sitt original
-   för sig. Nya ljud läggs sist i sin motor. Minnet är nästan fullt: `test/cykler/kor.py` räknar det och stoppar
+   för sig. Nya ljud läggs sist i sin motor. Tangenterna går till motorn genom ARP och SEQ (`src/spel_fm1.c`), som
+   körs i ljudavbrottet: modulen köar tangenter och knappar från huvudloopen, och slår aldrig an en ton därifrån.
+   Minnet är nästan fullt: `test/cykler/kor.py` räknar det och stoppar
    om modulen inte ryms.
 
 ## Kommandon

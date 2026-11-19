@@ -33,5 +33,8 @@ void pump_midi(pump_t *p, uint32_t status, uint32_t now_ticks);    /* F8 klocka,
 void pump_begin(pump_t *p, uint32_t now_ticks);                    /* i början av varje ljudblock */
 void pump_gain(pump_t *p, float *gain, uint32_t n);                /* nivån för n sampel (1 = orörd); stegar fasen */
 float pump_tempo(const pump_t *p);                                 /* takten som gäller nu (klockans när den finns) */
+/* MIDI-klockans läge, för det som ska gå i takt med den (ARP, SEQ): 0 ingen klocka; annars 1 och *beats =
+ * fjärdedelar sedan klockans slag nummer (beat_idx & 15), med decimaler (heltal precis på slaget) */
+int pump_clock(const pump_t *p, uint32_t now_ticks, float *beats);
 
 #endif

@@ -10,7 +10,8 @@ motorns namn: `3 OSC V2.0` eller `BRIS V2.0`).
 | **BRIS** | 050–139 | BLONDAs sexstämmiga analoga poly efter GS Music Bree6: oscillator + sub, 4-polig stege. BRIS i `blonda-motor`. |
 
 Gemensamt för båda: sex röster (poly stereo, poly, mono, unison), LFO med fem former, två ADSR, stereoensemble och
-eko. Efter motorerna, för alla ljud: reverbet **RUM**, **PUMP** (ducking i takt) och **ERA** (band och lofi).
+eko. Före motorerna, för alla ljud: **ARP** (arpeggio) och **SEQ** (stegsekvenser). Efter dem: reverbet **RUM**,
+**PUMP** (ducking i takt) och **ERA** (band och lofi).
 
 Ljuden i ordning: 000 init (3 OSC) · 001 one (signaturljudet) · 13 basar · 9 lead · 13 poly och pad · 7 tangenter
 och pluck · 6 effektljud · 050–138 BRIS 89 ljud (Poly Magic först) · 139 init (BRIS).
@@ -55,7 +56,8 @@ vågform, och en oscillator på nivå 0 räknas inte alls.
   vrids, självsvängning, alla LFO-former, ljudbyte och röstläge under spel, ekot ändras, ytterlägen, full volym;
   för 3 OSC också vågform, fotläge, stämning, brus, drivning, pulsbredd och PWM under spel.
 - **`test/modul_host.c`** – modulen körs oförändrad i en låtsas-FM-1 med fm1-dock:s eget typsnitt: skärmbilder av
-  båda motorernas sidor, rattar, knappar, lysdioder, MIDI med bank, alla 140 ljud hörs och ingen klippning,
+  båda motorernas sidor, rattar, knappar, lysdioder, MIDI med bank, alla 140 ljud hörs och ingen klippning, ARP och
+  SEQ (i ljudet, på skärmen, med MIDI-klocka, sparade),
   motorbyte under en ton (inget knäpp, ingen ton hänger kvar, klangen ligger kvar, böj och hjul följer med),
   reverbet dör ut till tystnad, pumpen duckar på slaget och följer MIDI-klocka, två kärnor låter som en, anrop av
   olika längd, kärna 1 som inte hinner, och SAVE som överlever en omstart (också det som sparats av ONE 1.0).
@@ -63,7 +65,7 @@ vågform, och en oscillator på nivå 0 räknas inte alls.
   i fm1-dock 0.7 på en emulerad FM-1 (fm1-emu) och spelar sex toner med ERA på TAPE, reverbet och pumpen på (det
   tyngsta läget). Bygget fallerar över 50 % av ljudavbrottet (fm1-dock:s råd), om ljudet uteblir eller om modulen
   inte ryms i minnet. `test/cykler/kor.py` ger ett snabbare ungefär här på datorn, för båda motorerna, och räknar
-  minnet (senast 277 KB av 278,5).
+  minnet (senast 276,5 KB av 278,5 i det riktiga bygget; lasten 43 % på kärna 0 med allt på).
 
 Allt körs med `./kolla.sh` här i mappen (sätt `BLONDA_MOTOR` och `FM1_DOCK` om de inte ligger bredvid `blonda-fm1`).
 Webbemulatorn i `web/` kör samma modul i webbläsaren.
@@ -72,7 +74,7 @@ Webbemulatorn i `web/` kör samma modul i webbläsaren.
 
 | | |
 |---|---|
-| tangenter / MIDI | 6 röster, velocity, pitch bend, modhjul (CC1), tryck, sustain (CC64). Program change = ljud 0–127; CC 0 = 1 först ger ljud 128–139 |
+| tangenter / MIDI | 6 röster, velocity, pitch bend, modhjul (CC1), tryck, sustain (CC64). Program change = ljud 0–127; CC 0 = 1 först ger ljud 128–139. MIDI-klocka, start och stopp: ARP, SEQ och PUMP följer |
 | PRESETS | byt ljud (140 st, laddas direkt) |
 | KNOB1–4 | de fyra parametrarna som visas |
 | SELECT | nästa / förra sidan |
@@ -82,10 +84,44 @@ Webbemulatorn i `web/` kör samma modul i webbläsaren.
 | ENV · LFO | EG2 AMP / EG1 FILTER · LFO / LFO MOD |
 | FX | FX (ensemble, eko) · RUM · RUM TONE · RUM SPACE · PUMP (tryck igen: nästa sida) |
 | GLO | VOICE (röstläge, portamento, unisonintervall, volym); BRIS också PLAY (anslag, böjomfång, tangentföljning) |
-| SAVE | sparar ljudet med ERA, reverb och pump; ONE startar med det nästa gång |
+| ARP | arpeggiot: första trycket visar ARP-sidan och slår på det, nästa slår av |
+| REC | spelar in en sekvens steg för steg (se nedan); REC igen: klar |
+| PLAY | spelar sekvensen runt; under inspelning: ett tyst steg |
+| SEQ | SEQ-sidan; under inspelning: bind (förra steget ett steg till) |
+| SAVE | sparar ljudet med ERA, reverb, pump, ARP och sekvensen; ONE startar med det nästa gång |
 | HOME (håll) | fm1-dock:s väljare: byt till en annan modul |
 
 Med KNOBS CC påslaget i fm1-dock kommer rattarna som CC 74, 71, 73, 72: cutoff, resonans, EG2 attack, release.
+
+## ARP och SEQ
+
+**ARP.** Tangenterna som hålls spelas en i taget, i takt. ARP-sidan: ARP MODE (UP, DOWN, UP/DOWN, RANDOM, ORDER =
+i den ordning de trycktes) · ARP RATE (1/4, 1/8, 1/8T, 1/16, 1/16T, 1/32) · ARP OCTAVES (1–4) · ARP GATE (hur stor
+del av steget tonen hålls; 100 = bundet). Pedalen (sustain) håller kvar tonerna i arpeggiot medan händerna gör
+annat; en ny tangent efter att alla släppts börjar ett nytt ackord. ARP-knappen lyser när arpeggiot är på.
+
+**SEQ.** En sekvens på upp till 64 steg, inspelad steg för steg:
+
+1. Tryck **REC** (lyser). Skärmen visar steget och vad knapparna gör.
+2. Spela en ton, eller ett ackord på upp till sex toner. När tangenterna släpps är steget inne och nästa väntar.
+   **PLAY** ger ett tyst steg, **SEQ** förlänger förra steget (bindning).
+3. **REC** igen: klar. (REC och REC utan toner ändrar ingenting.)
+
+**PLAY** spelar sekvensen runt, och PLAY igen stannar. PLAY-knappen glöder när det finns en sekvens och lyser när
+den spelas. SEQ-sidan: SEQ RATE · SEQ GATE · SEQ KEYS · TEMPO. Med SEQ KEYS på TRANSPOSE flyttar en tangent
+sekvensen i tonhöjd (tangenten blir sekvensens första ton, från nästa steg); på PLAY spelar tangenterna ovanpå.
+Sekvensen går före arpeggiot: ARP vilar medan den spelas.
+
+**Takten** är TEMPO (40–240 BPM, samma som pumpens), eller MIDI-klockan när den kommer: då går stegen i takt med
+klockan och på dess slag, och MIDI start och stopp spelar och stannar sekvensen. Stegen räknas i ljudet, inte i
+huvudloopen: ett ljudanrop delas vid steget, så tonen börjar inom 16 sampel (0,36 ms) från sitt läge i stället för
+vid nästa anrop (upp till 5,8 ms sent). Koden ligger i `src/spel_fm1.c` och testas för sig (`test/spel_test.c`:
+ordning, takt, inspelning, klocka, och 60 000 slumpade drag utan att en ton hänger kvar) och genom hela modulen
+(`test/modul_host.c`: samma ljud, sampel för sampel, som samma toner spelade för hand på stegens sampel).
+
+SAVE sparar arpeggiots och sekvenserns inställningar med ljudet, och sekvensen själv i modulens flashbank
+(fm1-dock ger varje modul 8 KiB; ljudet stannar till en tiondels sekund när den skrivs, så det görs bara när
+sekvensen är ny).
 
 ## RUM – reverbet
 
@@ -139,10 +175,12 @@ one_module.c, module.cfg    fm1-dock-modulen: skärm, panel, MIDI, motorbytet, r
 src/one_fm1.c, .h           trioscillatormotorn (ren C99, bara float, inga beroenden)
 src/bris_fm1.c, .h          BRIS-motorn
 src/bfx_fm1.c, .h           ensemble, eko och utgång, gemensamma för motorerna
+src/spel_fm1.c, .h          ARP och SEQ: mellan tangenterna och motorn
 src/motor_matte.h           snabb matte utan libm, gemensam
 src/one_presets.h           parametrar och fabriksljud – GENERERADE ur blonda-motor (tools/gen_presets_one.py)
 src/bris_presets.h          likadant för BRIS (tools/gen_presets_bris.py)
-test/, test/bris/           likhet och scenarier per motor; låtsas-FM-1 (modul_host.c); cykler (last och minne)
+test/, test/bris/           likhet och scenarier per motor; ARP och SEQ (spel_test.c); låtsas-FM-1 (modul_host.c);
+                            cykler (last och minne)
 ```
 
 Efter rösterna (ensemble, eko, utgång) och i röstfördelningen är motorerna samma, i blonda-motor och här. Ändras en

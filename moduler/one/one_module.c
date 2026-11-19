@@ -20,7 +20,14 @@
  *                      takt: klangen eller allt viker undan på slaget; egen takt eller MIDI-klocka).
  *                      Reverb och pump hör till modulen, inte till ljudet: de ligger kvar när man byter ljud.
  *                      MIDI CC 91 = reverbets mix, CC 92 = pumpens djup.
- *   SAVE               sparar ljudet som det är nu, med ERA, reverb och pump; det laddas när ONE startar nästa gång
+ *   ARP                arpeggiot: första trycket visar ARP-sidan och slår på det, nästa slår av. Tangenterna som hålls
+ *                      spelas en i taget, i takt (TEMPO, eller MIDI-klockan); pedalen håller dem kvar.
+ *   REC                stegsekvensern spelar in: varje ton eller ackord blir ett steg när tangenterna släpps.
+ *                      Under inspelning: PLAY = tyst steg, SEQ = bind (förläng förra steget), REC = klar.
+ *   PLAY               spelar sekvensen runt (MIDI start och stopp gör detsamma). Tangenterna flyttar den i tonhöjd.
+ *   SEQ                SEQ-sidan: takt, tonernas längd, vad tangenterna gör under spel, tempo
+ *   SAVE               sparar ljudet som det är nu, med ERA, reverb, pump, ARP och sekvensen; det laddas när ONE
+ *                      startar nästa gång
  * Med KNOBS CC påslaget i fm1-dock kommer rattarna som CC 74, 71, 73, 72: cutoff, resonans, EG2 attack, release. */
 #include "hb_module.h"
 #include "bris_fm1.h"
@@ -29,6 +36,7 @@
 #include "sliten_fm1.h"
 #include "rum_fm1.h"
 #include "pump_fm1.h"
+#include "spel_fm1.h"
 
 #ifndef HB_F_MIDI_RT
 #define HB_F_MIDI_RT 16u                        /* nyare fm1-dock: MIDI-klockan kommer i ljudavbrottet (annars huvudloopen) */
@@ -44,7 +52,8 @@ static float clampf(float x, float lo, float hi);
 /* numreras från XBASE, över motorernas egna parametrar, så att sidorna kan blanda dem */
 #define XBASE 64
 enum { XP_rmix = XBASE, XP_rsize, XP_rdecay, XP_rtype, XP_rlowc, XP_rhighc, XP_rdamp, XP_rmodd,
-       XP_rpredel, XP_rwidth, XP_rduck, XP_rout, XP_pdepth, XP_prate, XP_ptarget, XP_bpm, XP_END };
+       XP_rpredel, XP_rwidth, XP_rduck, XP_rout, XP_pdepth, XP_prate, XP_ptarget, XP_bpm,
+       XP_amode, XP_arate, XP_aoct, XP_agate, XP_srate, XP_sgate, XP_skeys, XP_END };
 #define XN (XP_END - XBASE)
 typedef struct { const char *name; float lo, hi, def; uint8_t integer; int8_t rum; } xparam_t;
 static const xparam_t XPAR[XN] = {
@@ -56,6 +65,10 @@ static const xparam_t XPAR[XN] = {
     {"Duck", 0.f, 1.f, 0.f, 0, RU_duck}, {"Reverb Level", 0.f, 1.f, 0.75f, 0, RU_outv},
     {"Pump Depth", 0.f, 1.f, 0.f, 0, -1}, {"Pump Rate", 0.f, 4.f, 2.f, 1, -1},
     {"Pump Target", 0.f, 1.f, 0.f, 1, -1}, {"Tempo", 40.f, 240.f, 120.f, 1, -1},
+    {"Arp Mode", 0.f, (float)(SPEL_NMODES - 1), 0.f, 1, -1}, {"Arp Rate", 0.f, (float)(SPEL_NRATES - 1), 3.f, 1, -1},
+    {"Arp Octaves", 1.f, 4.f, 1.f, 1, -1}, {"Arp Gate", 0.05f, 1.f, 0.5f, 0, -1},
+    {"Seq Rate", 0.f, (float)(SPEL_NRATES - 1), 3.f, 1, -1}, {"Seq Gate", 0.05f, 1.f, 0.5f, 0, -1},
+    {"Seq Keys", 0.f, 1.f, 0.f, 1, -1},
 };
 static float xv[XN];
 static rum_t rum;
@@ -65,6 +78,10 @@ static volatile uint32_t rum_gen;               /* räknas upp när reverbet nol
 
 /* ------------------------------------------------------------------ sidor: en uppsättning per motor */
 typedef struct { const char *title; uint8_t btn; uint8_t p[4]; } page_t;
+/* ARP och SEQ: sist i båda motorerna, på sina egna knappar */
+#define S_PAGES \
+    {"ARP", HB_BTN_ARP, {XP_amode, XP_arate, XP_aoct, XP_agate}}, \
+    {"SEQ", HB_BTN_SEQ, {XP_srate, XP_sgate, XP_skeys, XP_bpm}}
 /* reverbets och pumpens sidor, samma för båda motorerna (FX-knappen, efter motorns egen FX-sida) */
 #define X_PAGES \
     {"RUM", HB_BTN_FX, {XP_rmix, XP_rsize, XP_rdecay, XP_rtype}}, \
@@ -85,6 +102,7 @@ static const page_t PAGES_ONE[] = {
     {"FX", HB_BTN_FX, {OP_chorus, OP_dtime, OP_dfb, OP_dmix}},
     X_PAGES,
     {"VOICE", HB_BTN_GLO, {OP_lage, OP_porta, OP_uniint, OP_vol}},
+    S_PAGES,
 };
 static const page_t PAGES_BRIS[] = {
     {"FILTER", HB_BTN_SEL, {BP_cut, BP_res, BP_eg1, BP_kbd}},
@@ -97,6 +115,7 @@ static const page_t PAGES_BRIS[] = {
     X_PAGES,
     {"VOICE", HB_BTN_GLO, {BP_lage, BP_porta, BP_uniint, BP_vol}},
     {"PLAY", HB_BTN_GLO, {BP_velf, BP_vela, BP_bendr, BP_kbda}},
+    S_PAGES,
 };
 
 /* ------------------------------------------------------------------ motorerna */
@@ -164,9 +183,9 @@ typedef struct {
     uint8_t version, preset, page, edited;      /* preset: ljudets nummer i sin motor (inte i hela listan, som kan växa) */
     float p[PMAX];                              /* ljudets parametrar i sin motors ordning */
     float era;
-    uint8_t x[XN];                              /* reverb och pump: 0..100 (heltal och tempo som de är) */
-    uint8_t engine, pad[3];                     /* ljudets motor (ENG_ONE, ENG_BRIS) */
-} settings_t;                                   /* 224 byte (fm1-dock tar upp till 240) */
+    uint8_t x[XN];                              /* reverb, pump, ARP och SEQ: 0..100 (heltal och tempo som de är) */
+    uint8_t engine, arp_on, pad[3];             /* ljudets motor (ENG_ONE, ENG_BRIS); ARP på */
+} settings_t;                                   /* 232 byte (fm1-dock tar upp till 240) */
 typedef char settings_fits[sizeof(settings_t) <= 240 ? 1 : -1];
 /* ONE 1.0 (bara trioscillatormotorn, utan reverb och pump): laddas, så att ett sparat ljud följer med */
 #define SET1_MAGIC 0x31454E4Fu                  /* "ONE1" */
@@ -184,7 +203,8 @@ static float last_bend, last_mw, last_at;       /* böj, hjul och tryck just nu:
 static int last_sus, bank;                      /* sustainpedalen; MIDI-banken (CC 0) för ljud över 127 */
 
 /* vad som syns, för att bara rita om det som ändrats */
-static struct { int preset, page, edited, saved, era, eng, row[4]; uint32_t voices; int32_t val[4]; } shown;
+static struct { int preset, page, edited, saved, era, eng, row[4]; uint32_t voices, spel; int32_t val[4]; } shown;
+static uint32_t seq_saved;                      /* spel_seq_changed när sekvensen senast sparades eller laddades */
 
 /* skärmens färger: varmt elfenben, orange och petrol på svart, som gamla instrumentpaneler */
 static const uint16_t C_NAME = HB_RGB(236, 230, 214),    /* ljudets namn */
@@ -275,6 +295,8 @@ static int32_t value_text(int p, char *s)
     static const char *const LW[5] = {"TRIANGLE", "RAMP UP", "RAMP DOWN", "SQUARE", "S&H"};
     static const char *const MD[4] = {"POLY ST", "POLY", "MONO", "UNISON"};
     static const char *const PR[5] = {"1/1", "1/2", "1/4", "1/8", "1/16"};
+    static const char *const AM[SPEL_NMODES] = {"UP", "DOWN", "UP/DOWN", "RANDOM", "ORDER"};
+    static const char *const SR_[SPEL_NRATES] = {"1/4", "1/8", "1/8T", "1/16", "1/16T", "1/32"};
     float v = par_get(p), lo = par_lo(p), hi = par_hi(p);
     int32_t bar = (int32_t)((v - lo) / (hi - lo) * 1000.f + 0.5f);
     int32_t iv = (int32_t)(v < 0.f ? v - 0.5f : v + 0.5f);
@@ -282,6 +304,10 @@ static int32_t value_text(int p, char *s)
     if (p == XP_rtype) put_str(s, iv ? "ROOM" : "HALL");
     else if (p == XP_prate) put_str(s, PR[iv < 0 ? 0 : iv > 4 ? 4 : iv]);
     else if (p == XP_ptarget) put_str(s, iv ? "ALL" : "REVERB");
+    else if (p == XP_amode) put_str(s, AM[iv < 0 ? 0 : iv >= SPEL_NMODES ? SPEL_NMODES - 1 : iv]);
+    else if (p == XP_arate || p == XP_srate) put_str(s, SR_[iv < 0 ? 0 : iv >= SPEL_NRATES ? SPEL_NRATES - 1 : iv]);
+    else if (p == XP_aoct) put_int(s, iv);
+    else if (p == XP_skeys) put_str(s, iv ? "PLAY" : "TRANSPOSE");
     else if (p == XP_bpm) {                     /* med MIDI-klocka: klockans takt */
         if (pump.ext) { put_int(put_str(s, "EXT "), tempo_shown()); bar = (tempo_shown() - 40) * 1000 / 200; }
         else put_str(put_int(s, iv), " BPM");
@@ -319,6 +345,13 @@ static void set_x(int p, float v)
     else if (p == XP_pdepth) pump.depth = v;
     else if (p == XP_prate) pump.rate = (int32_t)v;
     else if (p == XP_bpm) pump.bpm = v;
+    else if (p == XP_amode) spel_set.amode = (int32_t)v;
+    else if (p == XP_arate) spel_set.arate = (int32_t)v;
+    else if (p == XP_aoct) spel_set.aoct = (int32_t)v;
+    else if (p == XP_agate) spel_set.agate = v;
+    else if (p == XP_srate) spel_set.srate = (int32_t)v;
+    else if (p == XP_sgate) spel_set.sgate = v;
+    else if (p == XP_skeys) spel_set.skeys = (int32_t)v;
 }
 
 static void set_param(int p, float v)
@@ -334,6 +367,10 @@ static void leds(void)
     unsigned i;
     for (i = 0; i < sizeof PAGE_BTNS; i++) H->led(PAGE_BTNS[i], PAGE_BTNS[i] == PAGES[page].btn ? 1u : 2u);
     H->led(HB_BTN_SAVE, 2u);
+    H->led(HB_BTN_ARP, spel_set.arp_on ? 1u : 2u);                   /* lyser: arpeggiot är på */
+    H->led(HB_BTN_SEQ, PAGES[page].btn == HB_BTN_SEQ ? 1u : 2u);
+    H->led(HB_BTN_PLAY, spel_playing() ? 1u : spel_seq.len ? 2u : 0u);   /* glöder: det finns en sekvens att spela */
+    H->led(HB_BTN_REC, spel_recording() ? 1u : 2u);
 }
 
 /* Ladda ett ljud. Hör det till den andra motorn byts motorn: den gamla släpper sina toner (ljudavbrottet tonar ut
@@ -351,7 +388,8 @@ static void load_preset(int i)
         uint8_t btn = old->pages[page < old->npages ? page : 0].btn;
         for (k = 0; k < old->npages && k < page; k++) if (old->pages[k].btn == btn) at++;   /* vilken av knappens sidor */
         old->all_notes_off();
-        nw->bend(last_bend); nw->modwheel(last_mw); nw->aftertouch(last_at); nw->sustain(last_sus);
+        nw->bend(last_bend); nw->modwheel(last_mw); nw->aftertouch(last_at);
+        nw->sustain(spel_set.arp_on ? 0 : last_sus);    /* (med ARP på håller pedalen arpeggiot, inte motorns toner) */
         page = 0;
         for (k = 0; k < nw->npages; k++) if (nw->pages[k].btn == btn) { page = k; break; }
         for (; at > 0 && page + 1 < nw->npages && nw->pages[page + 1].btn == btn; at--) page++;
@@ -370,8 +408,11 @@ static void load_preset(int i)
  *   sedan reverbets klang: medan kärna 0 räknar ensemble och eko, eller, när bandet (ERA) är på, klangen för
  *   NÄSTA anrop medan kärna 0 räknar bandet. Bandet är det tyngsta kärna 0 gör efter rösterna, så då väntar ingen
  *   kärna på den andra. Reverbet räknar i samma ordning i båda fallen (klang, in, mix, klang, in, mix ...).
- * Klangen för ett block räknas ur ljudet före blocket (rum_tail med min_delay = blockets längd), så den kan gå
- * samtidigt. Det gör en predelay kortare än ett block (5,8 ms) lika lång som blocket; längre är exakt.
+ * Klangen för ett block räknas ur ljudet före blocket (rum_tail med min_delay = ett helt anrop, 256 sampel), så
+ * den kan gå samtidigt. Det gör en predelay kortare än 5,8 ms till 5,8 ms; längre är exakt.
+ *
+ * Ett anrop räknas i bitar när ARP eller SEQ har ett steg mitt i det: fram till steget, sedan resten, så att
+ * tonen börjar på rätt ställe (inom 16 sampel, 0,36 ms) och inte först vid nästa anrop (upp till 5,8 ms sent).
  *
  * Minnet är trångt (reverbet och ekot tar nästan allt), så anropets buffertar delas med motorerna (bfx_fm1.h):
  * motorns utgång skrivs över rösternas mix (bfx_block får skriva där den läser), och pumpens kurva ligger där
@@ -384,13 +425,61 @@ static float wetL[BFX_MAXN], wetR[BFX_MAXN];    /* reverbets klang för anropet 
 static uint32_t pre_n, pre_gen;                 /* så många sampel klang är räknade i förväg, och för vilken nollställning */
 static const engine_t *RE;                      /* motorn som det här anropet räknar (också på kärna 1) */
 static void c1_voices(uint32_t arg) { (void)arg; RE->render_voices(3, 6, 1); }
-static void c1_tail(uint32_t k) { rum_tail(&rum, wetL, wetR, k, k); }
+/* (min_delay är alltid ett helt anrop: anropen är olika långa när ARP och SEQ delar dem, och predelayen ska inte ändras med dem) */
+static void c1_tail(uint32_t k) { rum_tail(&rum, wetL, wetR, k, BFX_MAXN); }
+
+/* Tangenter, pedal och knappar till ARP och SEQ: de köas här i huvudloopen och lämnas i början av nästa ljudanrop,
+ * så att tonerna bara slås an från ljudet (i takt, på rätt sampel). En kö med en som skriver och en som läser. */
+enum { Q_NOTE, Q_PEDAL, Q_CMD, Q_PANIC };
+#define QN 64u
+static volatile uint16_t q[QN];
+static volatile uint32_t q_w, q_r, q_lost;
+static volatile uint32_t clk_start, clk_stop;   /* MIDI start och stopp (kan komma i ljudavbrottet) */
+static void q_put(uint32_t type, uint32_t a, uint32_t b)
+{
+    uint32_t w = q_w, nx = (w + 1u) & (QN - 1u);
+    if (nx == q_r) { q_lost = 1; return; }      /* full (ljudet går inte?): hellre tyst än en ton som hänger */
+    q[w] = (uint16_t)(type << 14 | (a & 127u) << 7 | (b & 127u));
+    q_w = nx;
+}
+static void sp_note(int note, int vel) { const engine_t *e = E; if (vel) e->note_on(note, vel); else e->note_off(note); }
+static void sp_sustain(int down) { E->sustain(down); }
+static void sp_all_off(void) { E->all_notes_off(); }
+static const spel_out_t SP_OUT = {sp_note, sp_sustain, sp_all_off};
+
+static float r_bpm;                             /* takten i det här anropet */
+static int r_ext;
+/* nästa bit av anropet: fram till nästa steg i ARP eller SEQ (avrundat uppåt till 16 sampel), högst avail */
+static uint32_t plan(uint32_t avail)
+{
+    uint32_t lim = avail > BFX_MAXN ? BFX_MAXN : avail, k = (spel_plan(lim, r_bpm) + 15u) & ~15u;
+    return k > lim ? lim : k;
+}
 
 static void render(int32_t *out, uint32_t n)
 {
-    pump_begin(&pump, H->ticks());
+    uint32_t now = H->ticks(), n_call = n;
+    float beats = 0.f;
+    pump_begin(&pump, now);
+    r_ext = pump_clock(&pump, now, &beats);
+    r_bpm = pump_tempo(&pump);
+    if (r_ext) spel_sync(beats);
+    if (q_lost) { q_lost = 0; q_r = q_w; spel_panic(); }
+    if (clk_stop) { clk_stop = 0; spel_cmd(SPEL_CMD_STOP); }
+    if (clk_start) { clk_start = 0; spel_cmd(SPEL_CMD_START); }
+    while (q_r != q_w) {
+        uint32_t e = q[q_r], a = e >> 7 & 127u, b = e & 127u;
+        q_r = (q_r + 1u) & (QN - 1u);
+        switch (e >> 14) {
+        case Q_NOTE: spel_note((int)a, (int)b); break;
+        case Q_PEDAL: spel_pedal((int)b); break;
+        case Q_CMD: spel_cmd((int)b); break;
+        default: spel_panic(); break;
+        }
+    }
+    spel_run(0, r_bpm, r_ext);                  /* det som ska börja nu (första tonen i ett arpeggio, PLAY) */
     while (n) {
-        uint32_t k = n > BFX_MAXN ? BFX_MAXN : n, i, have;
+        uint32_t k = plan(n), i, have, nk;
         int two, rv = rum_on, tp = tape_on, tail_out = 0, pre_out = 0, pumping, target = (int)xv[XP_ptarget - XBASE];
         const engine_t *ne = E;                 /* ljudets motor nu */
         if (!rv || pre_gen != rum_gen) { pre_n = 0; pre_gen = rum_gen; }   /* reverbet av, eller nollställt sedan sist (set_x) */
@@ -402,7 +491,7 @@ static void render(int32_t *out, uint32_t n)
         if (two && H->c1_wait() != 0) { c1_voices(0); two = 0; }   /* kärna 1 blev inte klar (och är tagen nu): räkna här */
         if (rv && have < k) {                   /* klangen är inte räknad i förväg (eller bara en del: anropen är olika långa) */
             if (have == 0 && two && H->c1_run(c1_tail, k)) tail_out = 1;
-            else rum_tail(&rum, wetL + have, wetR + have, k - have, k);
+            else rum_tail(&rum, wetL + have, wetR + have, k - have, BFX_MAXN);
             have = k;
         }
         if (ne != RE) {                         /* ljudet har bytt motor: den gamla motorns röster tonas ut här */
@@ -413,7 +502,9 @@ static void render(int32_t *out, uint32_t n)
             }
         }
         RE->render_end(bufL, bufR);
-        if (ne != RE) { RE->reset_voices(); AE = ne; }
+        if (ne != RE) { RE->all_notes_off(); RE->reset_voices(); AE = ne; }   /* (också toner som slagits an sedan bytet) */
+        spel_run(k, r_bpm, r_ext);              /* stegen som ska komma nu: tonerna börjar i nästa bit */
+        nk = n - k ? plan(n - k) : plan(n_call);    /* så lång blir nästa bit (nästa anrop väntas bli lika långt som det här) */
         pumping = pump.depth > 0.f || pump.g < 0.9999f;
         pump_gain(&pump, pgain, k);
         if (rv) {
@@ -426,7 +517,7 @@ static void render(int32_t *out, uint32_t n)
             rum_mix(&rum, bufL, bufR, wetL, wetR, k);
             pre_n = have - k;
             if (pre_n) for (i = 0; i < pre_n; i++) { wetL[i] = wetL[i + k]; wetR[i] = wetR[i + k]; }   /* resten först */
-            else if (tp && two && H->c1_run(c1_tail, k)) pre_out = 1;   /* nästa anrops klang, medan bandet räknas här */
+            else if (tp && two && H->c1_run(c1_tail, nk)) pre_out = 1;   /* nästa bits klang, medan bandet räknas här */
         }
         if (pumping && target != 0) for (i = 0; i < k; i++) { bufL[i] *= pgain[i]; bufR[i] *= pgain[i]; }
         if (tp) {
@@ -440,10 +531,10 @@ static void render(int32_t *out, uint32_t n)
         }
         if (pre_out) {                          /* jobbet lämnas aldrig kvar efter anropet */
             if (H->c1_wait() != 0) {
-                for (i = 0; i < k; i++) wetL[i] = wetR[i] = 0.f;
-                rum_resync(&rum, k);
+                for (i = 0; i < nk; i++) wetL[i] = wetR[i] = 0.f;
+                rum_resync(&rum, nk);
             }
-            pre_n = k;
+            pre_n = nk;
         }
         out += 2u * k;
         n -= k;
@@ -455,8 +546,7 @@ static void note(uint32_t ch, uint32_t key, uint32_t vel)
 {
     (void)ch;
     if (key > 127u) return;
-    if (vel) E->note_on((int)key, (int)(vel > 127u ? 127u : vel));
-    else E->note_off((int)key);
+    q_put(Q_NOTE, key, vel > 127u ? 127u : vel);   /* till ARP och SEQ, och därifrån till motorn */
 }
 
 static void cc(uint32_t ch, uint32_t num, uint32_t val)
@@ -466,8 +556,8 @@ static void cc(uint32_t ch, uint32_t num, uint32_t val)
     switch (num) {
     case 0: bank = val ? 1 : 0; break;          /* bank: program change ger då ljud 128 och uppåt */
     case 1: last_mw = v; E->modwheel(v); break;
-    case 64: last_sus = val >= 64u; E->sustain(last_sus); break;
-    case 120: case 123: E->all_notes_off(); break;
+    case 64: last_sus = val >= 64u; q_put(Q_PEDAL, 0, (uint32_t)last_sus); break;
+    case 120: case 123: q_put(Q_PANIC, 0, 0); break;
     case 74: set_param(E->cc[0], v); break;     /* fm1-dock:s KNOBS CC */
     case 71: set_param(E->cc[1], v); break;
     case 73: set_param(E->cc[2], v); break;
@@ -481,7 +571,12 @@ static void cc(uint32_t ch, uint32_t num, uint32_t val)
 
 static void midi(uint32_t st, uint32_t d1, uint32_t d2)
 {
-    if (st >= 0xF8u) { pump_midi(&pump, st, H->ticks()); return; }   /* klocka och transport: pumpen följer */
+    if (st >= 0xF8u) {                          /* klocka och transport: pumpen, ARP och SEQ följer */
+        pump_midi(&pump, st, H->ticks());
+        if (st == 0xFAu) clk_start = 1;         /* start: sekvensen från början */
+        else if (st == 0xFCu) clk_stop = 1;
+        return;
+    }
     switch (st & 0xF0u) {
     case 0x90: note(st & 15u, d1, d2); break;
     case 0x80: note(st & 15u, d1, 0); break;
@@ -520,14 +615,28 @@ static void ui(uint32_t ev, int32_t arg)
         settings_t s;
         int i;
         s.magic = SET_MAGIC; s.version = SET_VERSION; s.preset = (uint8_t)preset_index(preset); s.page = (uint8_t)page; s.edited = (uint8_t)edited;
-        s.engine = (uint8_t)eng; s.pad[0] = s.pad[1] = s.pad[2] = 0;
+        s.engine = (uint8_t)eng; s.arp_on = (uint8_t)spel_set.arp_on; s.pad[0] = s.pad[1] = s.pad[2] = 0;
         for (i = 0; i < PMAX; i++) s.p[i] = i < E->np ? E->get(i) : 0.f;
         s.era = (float)era;
         for (i = 0; i < XN; i++) s.x[i] = (uint8_t)(XPAR[i].integer ? xv[i] + 0.5f : xv[i] * 100.f + 0.5f);
         H->save(&s, sizeof s);
+        /* sekvensen, om den är ny: i modulens egen flashbank (fm1-dock; ljudet stannar till ~0,1 s medan den skrivs) */
+        if (seq_saved != spel_seq_changed && !spel_recording() && HB_HOST_HAS(H, bank_save) && H->bank_save) {
+            uint32_t c = spel_seq_changed;
+            if (H->bank_save(&spel_seq, sizeof spel_seq) == 0) seq_saved = c;
+        }
         saved_ms = H->ms() | 1u;
         return;
     }
+    if (id == HB_BTN_PLAY) { q_put(Q_CMD, 0, SPEL_CMD_PLAY); return; }   /* spela / stanna; under inspelning: tyst steg */
+    if (id == HB_BTN_REC) {                     /* spela in / klar; inspelningen visas på SEQ-sidan */
+        int i;
+        if (!spel_recording()) for (i = 0; i < NPAGES; i++) if (PAGES[i].btn == HB_BTN_SEQ) page = i;
+        q_put(Q_CMD, 0, SPEL_CMD_REC);
+        leds();
+        return;
+    }
+    if (id == HB_BTN_SEQ && spel_recording()) { q_put(Q_CMD, 0, SPEL_CMD_TIE); return; }   /* bind: förra steget ett steg till */
     {   /* sidknapparna: första trycket öppnar sidan, nästa växlar till sidans andra halva */
         int i, first = -1, next = -1;
         for (i = 0; i < NPAGES; i++)
@@ -536,6 +645,10 @@ static void ui(uint32_t ev, int32_t arg)
                 if (i > page && next < 0 && PAGES[page].btn == id) next = i;
             }
         if (first < 0) return;
+        if (id == HB_BTN_ARP) {                 /* första trycket visar sidan och slår på arpeggiot, nästa slår av och på */
+            if (page == first) spel_set.arp_on = !spel_set.arp_on;
+            else spel_set.arp_on = 1;
+        }
         page = next >= 0 ? next : first;
         leds();
     }
@@ -559,15 +672,38 @@ static void draw_row(int r)
     if (w < 224) H->fill(8 + w, y + 20, 224 - w, 5, C_TRACK);
 }
 
+/* under inspelning visar SEQ-sidan vad knapparna gör i stället för rattarnas värden */
+static void draw_hint(int r)
+{
+    static const char *const K[4] = {"KEYS", "PLAY", "SEQ", "REC"};
+    static const char *const D[4] = {"ADD STEP", "REST", "TIE", "DONE"};
+    int32_t y = 110 + r * 32, tw = H->text_w(0, D[r]);
+    H->text(8, y, 142, 0, K[r], C_LBL, 0);
+    H->fill(150, y, 82, 16, C_BLACK);
+    H->text(232 - tw, y, tw, 0, D[r], C_VAL, 0);
+    H->fill(8, y + 20, 224, 5, C_BLACK);
+}
+
 static void draw(uint32_t full)
 {
-    int r;
+    int r, retitle = 0;
     uint32_t vm = E->meter_voices();
     int saving = saved_ms && H->ms() - saved_ms < 1500u;
+    /* ARP och SEQ: läget (spelar, spelar in, ARP på, sekvensens längd) och steget */
+    int rec = spel_recording(), play = spel_playing(), step = spel_step();
+    uint32_t sp = (uint32_t)play | (uint32_t)rec << 1 | (uint32_t)(spel_set.arp_on != 0) << 2 | (uint32_t)spel_seq.len << 8 | (uint32_t)step << 16;
+    int on_arp, on_seq, hint;
     if (full) {
         H->fill(0, HB_TOP, 240, 240 - HB_TOP, C_BLACK);
         shown.preset = shown.page = shown.edited = shown.saved = shown.era = shown.eng = -1;
         shown.voices = ~0u;
+        shown.spel = ~sp;
+    }
+    on_arp = PAGES[page].btn == HB_BTN_ARP; on_seq = PAGES[page].btn == HB_BTN_SEQ; hint = on_seq && rec;
+    if (sp != shown.spel) {
+        if ((sp ^ shown.spel) & 0xFFFFu) leds();
+        retitle = on_arp || on_seq;
+        shown.spel = sp;
     }
     if (eng != shown.eng) {                     /* en annan motor: andra sidor och parametrar, också med samma nummer */
         shown.page = -1;
@@ -588,22 +724,33 @@ static void draw(uint32_t full)
         else H->text(8, 52, 224, 0, s, C_NAME, 0);
         shown.preset = preset; shown.edited = edited;
     }
-    if (page != shown.page || saving != shown.saved) {
+    if (page != shown.page || saving != shown.saved || retitle) {
         char s[24];
         int i, n = 0, k = 0;
         for (i = 0; i < NPAGES; i++) if (PAGES[i].btn == PAGES[page].btn) { n++; if (i <= page) k = n; }
         if (saving) put_str(s, "SAVED");
+        else if (on_arp) put_str(put_str(s, "ARP  "), spel_set.arp_on ? "ON" : "OFF");
+        else if (on_seq) {                      /* SEQ  REC STEP 5 · SEQ  PLAY 3/16 · SEQ  16 STEPS · SEQ  EMPTY */
+            char *e = put_str(s, "SEQ  ");
+            if (rec) put_int(put_str(e, "REC STEP "), step + 1);
+            else if (play) { e = put_int(put_str(e, "PLAY "), step + 1); put_int(put_str(e, "/"), spel_seq.len); }
+            else if (spel_seq.len) put_str(put_int(e, spel_seq.len), " STEPS");
+            else put_str(e, "EMPTY");
+        }
         else if (n > 1) { char *e = put_str(s, PAGES[page].title); e = put_str(e, "  "); e = put_int(e, k); e = put_str(e, "/"); put_int(e, n); }
         else put_str(s, PAGES[page].title);
         H->text(8, 82, 150, 0, s, saving ? C_VAL : C_HEAD, 0);
         H->fill(8, 102, 224, 1, C_RULE);
-        for (r = 0; r < 4; r++) shown.row[r] = -1;
+        if (page != shown.page) for (r = 0; r < 4; r++) shown.row[r] = -1;
         shown.page = page; shown.saved = saving;
     }
     for (r = 0; r < 4; r++) {
-        int p = PAGES[page].p[r];
-        int32_t v = p == XP_bpm ? tempo_shown() + (pump.ext ? 1000 : 0) : (int32_t)(par_get(p) * 1000.f);
-        if (shown.row[r] != p || shown.val[r] != v) { draw_row(r); shown.row[r] = p; shown.val[r] = v; }
+        int p = hint ? 1000 + r : PAGES[page].p[r];
+        int32_t v = hint ? 0 : p == XP_bpm ? tempo_shown() + (pump.ext ? 1000 : 0) : (int32_t)(par_get(p) * 1000.f);
+        if (shown.row[r] != p || shown.val[r] != v) {
+            if (hint) draw_hint(r); else draw_row(r);
+            shown.row[r] = p; shown.val[r] = v;
+        }
     }
     if (vm != shown.voices) {                   /* sex prickar: rösterna som låter */
         for (r = 0; r < 6; r++) H->fill(170 + r * 11, 86, 8, 8, vm >> r & 1u ? C_VAL : C_TRACK);
@@ -639,6 +786,12 @@ static int init(const hb_host_t *h)
     rum_init(&rum);
     pump_init(&pump);
     rum_on = 0; rum_gen++;
+    spel_defaults();                            /* ARP av och en tom sekvens; den sparade sekvensen ur flashbanken */
+    if (HB_HOST_HAS(H, bank_load) && H->bank_load
+        && !(H->bank_load(&spel_seq, sizeof spel_seq) == 0 && spel_seq.magic == SPEL_MAGIC && spel_seq.len <= SPEL_STEPS))
+        spel_seq_clear();
+    seq_saved = spel_seq_changed;
+    q_w = q_r = q_lost = 0; clk_start = clk_stop = 0;
     for (i = 0; i < XN; i++) set_x(XBASE + i, XPAR[i].def);
     if (H->load(&s, sizeof s) == 0 && s.magic == SET_MAGIC && s.version == SET_VERSION && preset_number(s.engine, s.preset) >= 0) {
         load_preset(preset_number(s.engine, s.preset));   /* motorn och det som inte sparas; sedan värdena som de sparades */
@@ -647,9 +800,12 @@ static int init(const hb_host_t *h)
         edited = s.edited;
         set_era((int32_t)s.era);
         for (i = 0; i < XN; i++) set_x(XBASE + i, XPAR[i].integer ? (float)s.x[i] : (float)s.x[i] * 0.01f);
+        spel_set.arp_on = s.arp_on ? 1 : 0;
     } else if (H->load(&s1, sizeof s1) == 0 && s1.magic == SET1_MAGIC && s1.version == 1 && s1.preset < ONE_NPRESETS) {
         load_preset(s1.preset);                 /* ONE 1.0: samma ljud och nummer; reverb och pump på standard (av) */
-        page = s1.page < 11 ? s1.page : s1.page == 11 ? NPAGES - 1 : 0;   /* VOICE ligger nu efter reverbets sidor */
+        page = 0;                               /* samma sidor som då, utom VOICE som nu ligger efter reverbets */
+        if (s1.page < 11) page = s1.page;
+        else for (i = 0; i < NPAGES; i++) if (PAGES[i].btn == HB_BTN_GLO) { page = i; break; }
         for (i = 0; i < OP_N; i++) one_set(i, s1.p[i]);
         edited = s1.edited;
         set_era((int32_t)s1.era);
@@ -658,6 +814,7 @@ static int init(const hb_host_t *h)
         load_preset(1);                         /* one */
     }
     AE = E;                                     /* ljudavbrottet går inte än: ingen uttoning att göra */
+    spel_init(&SP_OUT);
     leds();
     H->log("one: redo");
     return 0;

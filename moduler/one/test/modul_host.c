@@ -16,6 +16,8 @@
 #define NPRESETS (ONE_NPRESETS + BRIS_NPRESETS)
 #define BRIS0 (ONE_NPRESETS - 1)                /* BRIS-ljud nr i (1..89) har nummer BRIS0 + i; BRIS init är sist */
 #define NPMAX ((int)OP_N > (int)BP_N ? (int)OP_N : (int)BP_N)
+#define NX 23                                   /* modulens egna parametrar i det sparade: reverb 12, pump 4, ARP 4, SEQ 3 */
+#define SET_N (8 + NPMAX * 4 + 4 + NX + 5)      /* det sparade: 232 byte */
 
 /* ---- skärmen: 240 x 240 RGB565, som panelen får den (gfx.c skickar byten omvända) */
 static uint16_t fb[240 * 240];
@@ -73,6 +75,11 @@ static uint32_t store_n;
 static int h_load(void *p, uint32_t n) { if (!store_n || n > store_n) return -1; memcpy(p, store, n); return 0; }
 static void h_save(const void *p, uint32_t n) { if (n <= 240u) { memcpy(store, p, n); store_n = n; } else bad_draw += 1000; }
 static void h_midi_send(uint32_t st, uint32_t d1, uint32_t d2) { (void)st; (void)d1; (void)d2; }
+/* modulens flashbank (fm1-dock: 8 KiB med CRC): det som sparats, eller inget */
+static uint8_t bank[8176];
+static uint32_t bank_n, bank_saves;
+static int h_bank_load(void *p, uint32_t n) { if (!bank_n || n != bank_n) return -1; memcpy(p, bank, n); return 0; }
+static int h_bank_save(const void *p, uint32_t n) { if (n > sizeof bank) return -1; memcpy(bank, p, n); bank_n = n; bank_saves++; return 0; }
 static uint32_t h_master(void) { return 4096u; }
 
 /* den andra kärnan: kör jobbet direkt (samma resultat som parallellt, rösterna delar inget tillstånd) */
@@ -93,6 +100,7 @@ static const hb_host_t HOST = {
     .fill = h_fill, .text = h_text, .cv_begin = h_cv_begin, .cv_rect = cv_rect, .cv_line = cv_line, .cv_pixel = h_cv_pixel,
     .cv_text = h_cv_text, .cv_blit = h_cv_blit, .led = h_led, .rand = h_rand, .load = h_load, .save = h_save,
     .midi_send = h_midi_send, .master = h_master, .text_w = h_text_w, .c1_run = h_c1_run, .c1_wait = h_c1_wait,
+    .bank_load = h_bank_load, .bank_save = h_bank_save,
 };
 
 extern const hb_module_t hb_module;
@@ -663,11 +671,11 @@ int main(int argc, char **argv)
             btn(HB_BTN_SEL);
             btn(HB_BTN_SAVE);
             now_ms += 10; M->draw(0); shot(base, n++);  /* 32, 34: SAVED */
-            CHECK(store_n == 8 + NPMAX * 4 + 4 + 16 + 4 && store_n <= 240u, "inställningarna ryms i modulens 240 byte");
+            CHECK(store_n == SET_N && store_n <= 240u, "inställningarna ryms i modulens 240 byte");
             memcpy(&e, store + 8 + NPMAX * 4, 4);
-            printf("  sparat (%s): %u byte, version %u, motor %u, ljud %u i motorn, era %.1f, reverbmix %u, pumpdjup %u, tempo %u\n", e2 ? "BRIS" : "3 OSC", store_n, store[4], x[16], store[5], (double)e, x[0], x[12], x[15]);
+            printf("  sparat (%s): %u byte, version %u, motor %u, ljud %u i motorn, era %.1f, reverbmix %u, pumpdjup %u, tempo %u\n", e2 ? "BRIS" : "3 OSC", store_n, store[4], x[NX], store[5], (double)e, x[0], x[12], x[15]);
             CHECK(e == 30.f, "ERA sparas med ljudet (TAPE 30)");
-            CHECK(store[4] == 1 && x[16] == e2 && store[5] == 7 && x[0] == 40 && x[12] == 60 && x[15] == 108, "ljudets motor och nummer i motorn, reverb, pump och tempo sparas");
+            CHECK(store[4] == 1 && x[NX] == e2 && store[5] == 7 && x[0] == 40 && x[12] == 60 && x[15] == 108, "ljudets motor och nummer i motorn, reverb, pump och tempo sparas");
             M->release();
             CHECK(M->init(&HOST) == 0, "ny start");
             M->draw(1); shot(base, n++);        /* 33, 35: samma ljud, ändrat (*), TAPE 30 */
@@ -700,8 +708,182 @@ int main(int argc, char **argv)
         btn(HB_BTN_SAVE);
         x = store + 8 + NPMAX * 4 + 4;
         { float e; memcpy(&e, store + 8 + NPMAX * 4, 4);
-          CHECK(store_n == 224 && !memcmp(store, "ONE2", 4) && x[16] == 0 && store[5] == 9 && store[7] == 1 && !memcmp(store + 8, p0, sizeof p0) && e == 45.f && x[0] == 0 && x[12] == 0 && x[15] == 120,
+          CHECK(store_n == SET_N && !memcmp(store, "ONE2", 4) && x[NX] == 0 && store[5] == 9 && store[7] == 1 && !memcmp(store + 8, p0, sizeof p0) && e == 45.f && x[0] == 0 && x[12] == 0 && x[15] == 120,
                 "ONE 1.0 laddas: parametrarna och ERA kvar, reverb och pump av, sparas i det nya formatet"); }
+    }
+
+    /* ---- ARP och SEQ (stegens ordning och takt testas för sig i test/spel_test.c; här: knappar, skärm, lysdioder,
+     *      ljudet genom motorerna och att sekvensen sparas) */
+    {
+        /* Takten i ljudet prövas exakt: samma toner spelas en gång till för hand (utan ARP och SEQ), slagna an och
+         * släppta på de sampel där stegen ska ligga: sextondelar i 120 BPM är 5512,5 sampel, och ett steg börjar på
+         * närmaste 16 sampel efter sitt läge. Blir ljudet detsamma sampel för sampel ligger varje ton rätt. */
+        #define NS 60000
+        static int32_t a[2 * NS], bref[2 * NS];
+        typedef struct { double step; int note, vel; } tev_t;      /* händelse: vid steg nr step (decimaler), ton, anslag (0: släpp) */
+        int k;
+        #define PLAIN(buf) do { int at_ = 0; memset(buf, 0, sizeof(int32_t) * 2 * NS); while (at_ < NS) { int n_ = NS - at_ < 256 ? NS - at_ : 256; M->render(buf + 2 * at_, (uint32_t)n_); at_ += n_; } } while (0)
+        #define TIMED(buf, evs, nevs) do { int at_ = 0, e_ = 0; memset(buf, 0, sizeof(int32_t) * 2 * NS); \
+            while (at_ < NS) { int n_, t_; \
+                while (e_ < (nevs) && (t_ = ((int)ceil((evs)[e_].step * 5512.5) + 15) / 16 * 16) <= at_) { M->note(0, (uint32_t)(evs)[e_].note, (uint32_t)(evs)[e_].vel); e_++; } \
+                n_ = NS - at_ < 256 ? NS - at_ : 256; \
+                if (e_ < (nevs)) { t_ = ((int)ceil((evs)[e_].step * 5512.5) + 15) / 16 * 16; if (t_ - at_ < n_) n_ = t_ - at_; } \
+                M->render(buf + 2 * at_, (uint32_t)n_); at_ += n_; } } while (0)
+        #define SAME(x, y) (!memcmp(x, y, sizeof(int32_t) * 2 * NS))
+        #define ENERGY(x, e) do { int i_; e = 0; for (i_ = 0; i_ < 2 * NS; i_++) e += (double)(x)[i_] * (x)[i_]; } while (0)
+        double en;
+
+        M->release(); store_n = 0; bank_n = 0; M->init(&HOST);
+        prog(0);
+        CHECK(leds[HB_BTN_ARP] == 2u && leds[HB_BTN_REC] == 2u && leds[HB_BTN_PLAY] == 0u, "lysdioder från start: ARP och REC glöder, PLAY släckt (ingen sekvens)");
+        btn(HB_BTN_ARP);
+        CHECK(leds[HB_BTN_ARP] == 1u && drawn("ARP  ON") && drawn("Arp Mode") && drawn("1/16"), "ARP: sidan visas, arpeggiot på, lysdioden tänd");
+        M->draw(1); shot(base, n++);                         /* 36: ARP-sidan */
+        M->note(0, 55, 100); M->note(0, 48, 110); M->note(0, 60, 90);
+        PLAIN(a);                                            /* 1,36 s: tio steg */
+        M->note(0, 48, 0); M->note(0, 55, 0); M->note(0, 60, 0);
+        blocks_peak(200);
+        CHECK(blocks_peak(20) == 0, "ARP: tangenterna släppta: tyst");
+        {
+            static tev_t E1[40];
+            static const int N3[3] = {48, 55, 60}, V3[3] = {110, 100, 90};
+            for (k = 0; k < 11; k++) { E1[2 * k] = (tev_t){k, N3[k % 3], V3[k % 3]}; E1[2 * k + 1] = (tev_t){k + 0.5, N3[k % 3], 0}; }
+            M->release(); M->init(&HOST); prog(0);
+            TIMED(bref, E1, 22);
+            ENERGY(a, en);
+            CHECK(en > 1e9 && SAME(a, bref), "ARP UP i ljudet: en ton i taget, på sextondelarna inom 16 sampel (samma ljud som spelat för hand på de samplen)");
+            M->midi(0xB0, 123, 0); blocks_peak(200);
+            /* och provet märker ett fel: samma toner ett anrop (256 sampel) senare är inte samma ljud */
+            for (k = 0; k < 22; k++) E1[k].step += 256.0 / 5512.5;
+            M->release(); M->init(&HOST); prog(0);
+            TIMED(bref, E1, 22);
+            CHECK(!SAME(a, bref), "(provet skiljer på rätt sampel och ett anrop för sent)");
+            M->midi(0xB0, 123, 0); blocks_peak(200);
+        }
+        btn(HB_BTN_ARP);
+        prog(BRIS0 + 1);                                     /* motorbyte med ARP på: sidan och arpeggiot följer med */
+        CHECK(drawn("ARP  ON") && leds[HB_BTN_ARP] == 1u, "ARP: sidan ligger kvar när ljudet byter motor");
+        M->note(0, 60, 100); CHECK(blocks_peak(60) > 1000, "ARP spelar i BRIS-motorn"); M->note(0, 60, 0);
+        btn(HB_BTN_SEL); btn(HB_BTN_ARP);
+        CHECK(leds[HB_BTN_ARP] == 1u && drawn("ARP  ON"), "ARP från en annan sida: visar sidan, arpeggiot förblir på");
+        btn(HB_BTN_ARP);
+        CHECK(leds[HB_BTN_ARP] == 2u && redrawn("ARP  OFF"), "ARP igen: av");
+        blocks_peak(600);
+
+        /* REC: steg för steg */
+        prog(0);
+        btn(HB_BTN_REC); blocks_peak(2); M->draw(0);
+        CHECK(leds[HB_BTN_REC] == 1u && drawn("SEQ  REC STEP 1") && drawn("ADD STEP") && drawn("REST") && drawn("TIE") && drawn("DONE"),
+              "REC: SEQ-sidan visar steget och vad knapparna gör, lysdioden tänd");
+        M->draw(1); shot(base, n++);                         /* 37: inspelning */
+        M->note(0, 48, 110); CHECK(blocks_peak(10) > 1000, "under inspelning hörs tangenten"); M->note(0, 48, 0); blocks_peak(10);
+        CHECK(redrawn("SEQ  REC STEP 2"), "ett steg in: skärmen räknar upp");
+        M->note(0, 55, 100); M->note(0, 60, 110); blocks_peak(10); M->note(0, 55, 0); M->note(0, 60, 0); blocks_peak(10);   /* ackord */
+        btn(HB_BTN_PLAY); blocks_peak(2);                    /* tyst steg */
+        M->note(0, 52, 90); blocks_peak(10); M->note(0, 52, 0); blocks_peak(10);
+        btn(HB_BTN_SEQ); blocks_peak(2);                     /* bindning */
+        CHECK(drawn("SEQ  REC STEP 6"), "ton, ackord, tyst (PLAY), ton, bindning (SEQ): fem steg inne");
+        btn(HB_BTN_REC); blocks_peak(2); M->draw(0);
+        CHECK(leds[HB_BTN_REC] == 2u && leds[HB_BTN_PLAY] == 2u && drawn("SEQ  5 STEPS") && drawn("Seq Rate") && drawn("TRANSPOSE"),
+              "REC igen: klar, fem steg, PLAY glöder, sidan visar rattarna igen");
+        M->draw(1); shot(base, n++);                         /* 38: SEQ-sidan */
+        btn(HB_BTN_SAVE);
+        CHECK(bank_saves == 1 && bank_n == 516 && store_n == SET_N, "SAVE: sekvensen i flashbanken (516 byte), resten i inställningarna");
+        btn(HB_BTN_SAVE);
+        CHECK(bank_saves == 1, "SAVE igen utan ny sekvens: banken skrivs inte om (det stannar ljudet en stund)");
+
+        /* PLAY: i ljudet, mot samma toner för hand (ny start emellan: sekvensen kommer ur banken) */
+        M->release(); M->init(&HOST); M->draw(1);
+        btn(HB_BTN_SEQ);
+        CHECK(leds[HB_BTN_PLAY] == 2u && drawn("SEQ  5 STEPS"), "ny start: sekvensens fem steg är kvar");
+        btn(HB_BTN_PLAY);
+        PLAIN(a);
+        M->draw(0);
+        CHECK(leds[HB_BTN_PLAY] == 1u && (drawn("SEQ  PLAY 1/5") || drawn("SEQ  PLAY 2/5") || drawn("SEQ  PLAY 3/5") || drawn("SEQ  PLAY 4/5") || drawn("SEQ  PLAY 5/5")),
+              "PLAY: lysdioden tänd, skärmen visar steget som spelas");
+        M->draw(1); shot(base, n++);                         /* 39: spelar */
+        prog(BRIS0 + 5);                                     /* motorbyte medan sekvensen går: den fortsätter i den nya motorn */
+        blocks_peak(4);
+        CHECK(blocks_peak(200) > 1000 && leds[HB_BTN_PLAY] == 1u, "sekvensen fortsätter när ljudet byter motor");
+        M->midi(0xFC, 0, 0); blocks_peak(2); M->draw(0);
+        CHECK(leds[HB_BTN_PLAY] == 2u, "MIDI stopp: sekvensen stannar");
+        blocks_peak(3000);
+        CHECK(blocks_peak(20) == 0, "stoppad: tyst, ingen ton hänger (båda motorerna)");
+        M->midi(0xFA, 0, 0); blocks_peak(2); M->draw(0);
+        CHECK(leds[HB_BTN_PLAY] == 1u && blocks_peak(100) > 1000, "MIDI start: sekvensen spelar");
+        btn(HB_BTN_PLAY); blocks_peak(2); M->draw(0);
+        CHECK(leds[HB_BTN_PLAY] == 2u, "PLAY: stannar");
+        {
+            /* två varv: C · G+C (anslag 110) · paus · E bunden över två steg */
+            static tev_t E2[40];
+            int m = 0, lap;
+            for (lap = 0; lap < 3; lap++) {
+                double o = lap * 5.0;
+                E2[m++] = (tev_t){o, 48, 110}; E2[m++] = (tev_t){o + 0.5, 48, 0};
+                E2[m++] = (tev_t){o + 1, 55, 110}; E2[m++] = (tev_t){o + 1, 60, 110}; E2[m++] = (tev_t){o + 1.5, 55, 0}; E2[m++] = (tev_t){o + 1.5, 60, 0};
+                E2[m++] = (tev_t){o + 3, 52, 90}; E2[m++] = (tev_t){o + 4.5, 52, 0};
+            }
+            M->release(); bank_n = 0; M->init(&HOST);
+            TIMED(bref, E2, m);
+            ENERGY(a, en);
+            CHECK(en > 1e9 && SAME(a, bref), "SEQ i ljudet: ton, ackord, paus och bunden ton på sina steg, varv efter varv (samma ljud som för hand)");
+            M->midi(0xB0, 123, 0);
+            blocks_peak(600);
+        }
+
+        /* ARP-läget och inställningarna sparas */
+        btn(HB_BTN_ARP);                                     /* ARP på */
+        enc(HB_ENC_KNOB1, 2); enc(HB_ENC_KNOB3, 1);          /* UP/DOWN, två oktaver */
+        btn(HB_BTN_SAVE);
+        M->release(); M->init(&HOST); M->draw(1);
+        CHECK(leds[HB_BTN_ARP] == 1u && drawn("ARP  ON") && drawn("UP/DOWN"), "ny start: ARP på med sina inställningar");
+        btn(HB_BTN_ARP);                                     /* av */
+        blocks_peak(100);
+
+        /* MIDI-klocka: arpeggiot går i klockans takt, inte i den egna (120). Klockan i 100 BPM räknat i värdens
+         * millisekunder (6 per anrop; ljudets anrop är 5,8 ms, så i ljudet blir det 103 BPM): på 4 s ljud 27-28
+         * sextondelar, mot 32 i 120 BPM. Tonerna räknas som skurar i ljudet (init, attack och release 0, gate 50 %). */
+        {
+            int32_t out[512], pk = 0, bp[700];
+            int b, i2, t = 0, bursts = 0, low = 1;
+            M->release(); store_n = 0; M->init(&HOST);
+            prog(0); M->midi(0xB0, 73, 0); M->midi(0xB0, 72, 0);
+            btn(HB_BTN_ARP);
+            M->midi(0xFA, 0, 0);
+            for (b = 0; b < 300; b++) {                      /* klockan går en stund först: takten mäts */
+                while (t <= b * 6) { M->midi(0xF8, 0, 0); t += 25; }
+                memset(out, 0, sizeof out); M->render(out, 256); now_ms += 6;
+            }
+            M->note(0, 60, 110);
+            for (b = 0; b < 689; b++) {
+                while (t <= (300 + b) * 6) { M->midi(0xF8, 0, 0); t += 25; }
+                memset(out, 0, sizeof out); M->render(out, 256); now_ms += 6;
+                bp[b] = 0;
+                for (i2 = 0; i2 < 512; i2++) if (abs(out[i2]) > bp[b]) bp[b] = abs(out[i2]);
+                if (bp[b] > pk) pk = bp[b];
+            }
+            for (b = 0; b < 689; b++) { if (bp[b] < pk / 20) low = 1; else if (low && bp[b] > pk / 2) { bursts++; low = 0; } }
+            M->note(0, 60, 0);
+            seen_ext = 0; btn(HB_BTN_SEQ); M->draw(1);
+            printf("  ARP med MIDI-klocka: %d toner på 4 s (103 BPM ger 27-28, den egna takten 120 ger 32)\n", bursts);
+            CHECK(bursts >= 26 && bursts <= 29 && seen_ext, "MIDI-klocka: arpeggiot går i klockans takt, och SEQ-sidan visar den (EXT)");
+            btn(HB_BTN_ARP); btn(HB_BTN_ARP);                /* av */
+            for (b = 0; b < 500; b++) { memset(out, 0, sizeof out); M->render(out, 256); now_ms += 6; }
+        }
+
+        /* fler tangenter än kön rymmer utan att ljudet går: hellre tyst än en ton som hänger */
+        for (k = 0; k < 100; k++) M->note(0, (uint32_t)(30 + k % 60), 100);
+        blocks_peak(10);
+        for (k = 0; k < 60; k++) M->note(0, (uint32_t)(30 + k), 0);
+        blocks_peak(3000);
+        CHECK(blocks_peak(20) == 0, "kön full: allt tystas, ingen ton hänger");
+        M->note(0, 60, 100); CHECK(blocks_peak(20) > 1000, "och sedan spelar den som vanligt"); M->note(0, 60, 0);
+        CHECK(bad_draw == 0, "ARP- och SEQ-sidorna ritas inom skärmen");
+        #undef PLAIN
+        #undef TIMED
+        #undef SAME
+        #undef ENERGY
+        #undef NS
     }
 
     snprintf(wpath, sizeof wpath, "%s.wav", base);

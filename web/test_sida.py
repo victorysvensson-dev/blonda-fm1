@@ -6,6 +6,7 @@ Sparar skärmbilder av sidan i build/webb-*.png.
 """
 import http.server
 import os
+import re
 import sys
 import threading
 
@@ -217,6 +218,39 @@ with sync_playwright() as p:
         pg.click("text=EDIT"); pg.wait_for_timeout(250); sidor.add(lcd())
     check(len(sidor) == 5, f"3 OSC: EDIT bläddrar OSC 1, OSC 2, OSC 3 och MIX ({len(sidor) - 1} olika sidor)")
     pg.screenshot(path=os.path.join(OUT, "webb-7-one.png"))
+    # ARP och SEQ: knapparnas lysdioder, arpeggiot spelar, en sekvens spelas in steg för steg och spelas upp utan tangenter
+    knapp = lambda t: pg.locator(".btn", has_text=re.compile(f"^{t}$"))
+    led_of = lambda t: pg.evaluate("(t) => [...document.querySelectorAll('.btn')].find(b => b.textContent === t).dataset.led", t)
+    knapp("ARP").click(); pg.wait_for_timeout(250)
+    check(led_of("ARP") == "1", f"ARP: lysdioden tänds (led {led_of('ARP')})")
+    pg.mouse.move(5, 5)
+    pg.keyboard.down("KeyA"); pg.keyboard.down("KeyD"); pg.wait_for_timeout(400)
+    lvl = pg.evaluate(TAP); pg.keyboard.up("KeyA"); pg.keyboard.up("KeyD")
+    check(lvl > 0.05, f"ARP spelar tangenterna som hålls ({lvl:.3f})")
+    pg.screenshot(path=os.path.join(OUT, "webb-7b-arp.png"))
+    knapp("ARP").click(); pg.wait_for_timeout(250)
+    check(led_of("ARP") == "2", "ARP igen: av")
+    knapp("REC").click(); pg.wait_for_timeout(300)
+    check(led_of("REC") == "1" and led_of("SEQ") == "1", "REC: inspelning, SEQ-sidan visas")
+    pg.mouse.move(5, 5)
+    for k in ("KeyA", "KeyD", "KeyG", "KeyD"):
+        pg.keyboard.down(k); pg.wait_for_timeout(120); pg.keyboard.up(k); pg.wait_for_timeout(120)
+    pg.screenshot(path=os.path.join(OUT, "webb-7c-rec.png"))
+    knapp("REC").click(); pg.wait_for_timeout(300)
+    check(led_of("REC") == "2" and led_of("PLAY") == "2", f"REC igen: klar, PLAY glöder (REC {led_of('REC')}, PLAY {led_of('PLAY')})")
+    pg.wait_for_timeout(1200)
+    q0 = pg.evaluate(TAP)
+    knapp("PLAY").click(); pg.wait_for_timeout(500)
+    lvl = pg.evaluate(TAP)
+    check(led_of("PLAY") == "1" and lvl > 0.05 and q0 < 0.03, f"PLAY spelar sekvensen utan tangenter (tyst {q0:.3f}, spelar {lvl:.3f})")
+    pg.screenshot(path=os.path.join(OUT, "webb-7d-seq.png"))
+    knapp("PLAY").click(); pg.wait_for_timeout(300)
+    check(led_of("PLAY") == "2", "PLAY igen: stannar")
+    pg.click("text=SAVE"); pg.wait_for_timeout(400)
+    pg.click(".mods button[data-m=puls]"); pg.wait_for_timeout(700)
+    pg.click(".mods button[data-m=one]"); pg.wait_for_timeout(900)
+    check(led_of("PLAY") == "2", "SAVE sparar sekvensen i webbläsaren: den finns kvar när ONE startar igen")
+    pg.wait_for_timeout(800)
     h3o = head()
     pg.mouse.move(kp["x"] + 29, kp["y"] + 29)
     for _ in range(3):

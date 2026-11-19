@@ -74,16 +74,24 @@ static uint8_t store[240];
 static uint32_t store_n, saves;
 static int h_load(void *p, uint32_t n) { if (!store_n || n > store_n) return -1; memcpy(p, store, n); return 0; }
 static void h_save(const void *p, uint32_t n) { if (n <= 240u) { memcpy(store, p, n); store_n = n; saves++; } }
+/* modulens flashbank (fm1-dock: 8 KiB med CRC, för det som inte ryms i inställningarna: ONE:s sekvens) */
+static uint8_t bank[HB_BANK_MAX];
+static uint32_t bank_n;
+static int h_bank_load(void *p, uint32_t n) { if (!bank_n || n != bank_n) return -1; memcpy(p, bank, n); return 0; }
+static int h_bank_save(const void *p, uint32_t n) { if (n > HB_BANK_MAX) return -1; memcpy(bank, p, n); bank_n = n; saves++; return 0; }
+/* Det sidan sparar i webbläsaren, i ett stycke: inställningarna, och om banken är skriven också den och två byte
+ * sist (inställningarnas längd, 0xB4). Högst 240 byte är bara inställningar, som förut. */
+static uint8_t blob[240u + HB_BANK_MAX + 2u];
 static void h_midi_send(uint32_t st, uint32_t d1, uint32_t d2) { (void)st; (void)d1; (void)d2; }
 static uint32_t master_q12 = 4096u;
 static uint32_t h_master(void) { return master_q12; }
 
 static const hb_host_t HOST = {
-    .abi = HB_ABI, .size = (uint32_t)__builtin_offsetof(hb_host_t, bank_load),
+    .abi = HB_ABI, .size = (uint32_t)__builtin_offsetof(hb_host_t, sense_keys),
     .ms = h_ms, .ticks = h_ticks, .log = h_log, .log_u32 = h_log_u32, .fill = h_fill, .text = h_text,
     .cv_begin = h_cv_begin, .cv_rect = cv_rect, .cv_line = cv_line, .cv_pixel = h_cv_pixel, .cv_text = h_cv_text,
     .cv_blit = h_cv_blit, .led = h_led, .rand = h_rand, .load = h_load, .save = h_save, .midi_send = h_midi_send,
-    .master = h_master, .blit = h_blit, .text_w = h_text_w,
+    .master = h_master, .blit = h_blit, .text_w = h_text_w, .bank_load = h_bank_load, .bank_save = h_bank_save,
 };
 
 extern const hb_module_t hb_module;
@@ -177,7 +185,23 @@ __attribute__((export_name("w_dirty"))) uint32_t w_dirty(void) { uint32_t d = di
 __attribute__((export_name("w_fb"))) uint16_t *w_fb(void) { return fb; }
 __attribute__((export_name("w_leds"))) uint8_t *w_leds(void) { return leds; }     /* 64: knapparna, tangenterna från 14 */
 __attribute__((export_name("w_flags"))) uint32_t w_flags(void) { return hb_module.flags; }
-__attribute__((export_name("w_store"))) uint8_t *w_store(void) { return store; }
-__attribute__((export_name("w_store_n"))) uint32_t w_store_n(void) { return store_n; }
-__attribute__((export_name("w_store_set"))) void w_store_set(uint32_t n) { store_n = n <= 240u ? n : 0u; }
+__attribute__((export_name("w_store"))) uint8_t *w_store(void) { return blob; }
+__attribute__((export_name("w_store_n"))) uint32_t w_store_n(void)      /* lägger ihop det som ska sparas i blob; längden */
+{
+    memcpy(blob, store, store_n);
+    if (!bank_n) return store_n;
+    memcpy(blob + store_n, bank, bank_n);
+    blob[store_n + bank_n] = (uint8_t)store_n; blob[store_n + bank_n + 1u] = 0xB4u;
+    return store_n + bank_n + 2u;
+}
+__attribute__((export_name("w_store_set"))) void w_store_set(uint32_t n)   /* sidan har lagt n sparade byte i blob */
+{
+    store_n = 0; bank_n = 0;
+    if (n <= 240u) { memcpy(store, blob, n); store_n = n; return; }
+    if (n > sizeof blob || blob[n - 1u] != 0xB4u || blob[n - 2u] > 240u || (uint32_t)blob[n - 2u] + 2u > n) return;
+    store_n = blob[n - 2u];
+    bank_n = n - 2u - store_n;
+    memcpy(store, blob, store_n);
+    memcpy(bank, blob + store_n, bank_n);
+}
 __attribute__((export_name("w_saves"))) uint32_t w_saves(void) { return saves; }

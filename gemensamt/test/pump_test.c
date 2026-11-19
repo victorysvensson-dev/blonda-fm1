@@ -93,6 +93,15 @@ int main(void)
     run(&p, 97.0, 1.013, 100.0, 0, 0xFFF00000u);
     dips(4.0, 60.0 / 97, &per, &off, 1.013);
     CHECK(p.ext && fabs((double)pump_tempo(&p) - 97.0) < 0.2, "klocka 97 BPM: pumpen mäter %.2f BPM", (double)pump_tempo(&p));
+    {   /* pump_clock: klockans läge i fjärdedelar, för ARP och SEQ. Körningen slutar vid N - 256 sampel; klockan
+         * började vid 1,013 s, så läget där är (t - 1,013) * 97 / 60 fjärdedelar, räknat runt 16. */
+        float beats = -1.f;
+        double t_end = (double)(N - N % 256) / PUMP_SR, want = fmod((t_end - 1.013) * 97.0 / 60.0, 16.0);
+        int ok = pump_clock(&p, 0xFFF00000u + (uint32_t)(t_end * PUMP_TICKS_HZ), &beats);
+        CHECK(ok && fabs((double)beats - want) < 0.01, "pump_clock: klockans läge %.3f fjärdedelar (ska vara %.3f)", (double)beats, want);
+        pump_init(&p);
+        CHECK(!pump_clock(&p, 0, &beats), "pump_clock: ingen klocka, inget läge");
+    }
     CHECK(fabs(per - 60.0 / 97) < 0.0005, "pumpen går i klockans takt (%.4f s mot %.4f)", per, 60.0 / 97);
     CHECK(off < 0.016, "botten ligger på klockans slag (%.1f ms efter)", off * 1000);
     /* samma klocka som kommer fram upp till ett ljudblock (5,8 ms) sent, som i ljudavbrottet */
