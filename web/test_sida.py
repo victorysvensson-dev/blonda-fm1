@@ -135,6 +135,20 @@ with sync_playwright() as p:
     led = pg.evaluate("() => [...document.querySelectorAll('.btn')].find(b => b.textContent === 'FX').dataset.led")
     check(led == "1", f"FX-knappen tänds och visar FX-sidan (led {led})")
     pg.screenshot(path=os.path.join(OUT, "webb-3-fx.png"))
+    # FX igen: reverbets tre sidor och PUMP (fem sidor på FX-knappen), och KNOB1 på RUM-sidan slår på reverbet
+    fx_sidor = {lcd_hash()}
+    for i in range(4):
+        pg.click("text=FX"); pg.wait_for_timeout(250); fx_sidor.add(lcd_hash())
+        if i == 0:
+            hr = lcd_hash()
+            pg.mouse.move(k1["x"] + 29, k1["y"] + 29); pg.mouse.down(); pg.mouse.move(k1["x"] + 29, k1["y"] - 40, steps=6); pg.mouse.up()
+            pg.wait_for_timeout(250)
+            check(lcd_hash() != hr, "KNOB1 på RUM-sidan vrider upp reverbets mix")
+            pg.screenshot(path=os.path.join(OUT, "webb-3b-rum.png"))
+            pg.mouse.move(k1["x"] + 29, k1["y"] + 29); pg.mouse.down(); pg.mouse.move(k1["x"] + 29, k1["y"] + 200, steps=8); pg.mouse.up()
+            pg.wait_for_timeout(250)
+    check(len(fx_sidor) == 5, f"FX bläddrar FX, RUM, RUM TONE, RUM SPACE och PUMP ({len(fx_sidor)} olika sidor)")
+    pg.screenshot(path=os.path.join(OUT, "webb-3c-pump.png"))
     # OCT+ -> värdens rad visar OCT +1
     h2 = pg.evaluate("() => { const g = document.getElementById('lcd').getContext('2d').getImageData(160,0,80,24).data; let h=0; for (const v of g) h=(h*31+v)|0; return h; }")
     pg.click("#b-octp"); pg.wait_for_timeout(250)

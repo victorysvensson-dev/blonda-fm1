@@ -18,10 +18,13 @@ ha svar, kommentarer och dokumentation på svenska; kodnamn på engelska.
 4. **Kolla innan överlämning.** `./kolla.sh` måste vara grönt (alla moduler + webbemulatorn) innan något lämnas
    till Victory att prova.
 5. **Det som delas ligger i `gemensamt/`**: `snabbmatte.h` (float-approximationer), `effekter/` (BLONDA-effekter
-   portade ur blonda-motor, t.ex. SLITEN, med test mot originalet i `gemensamt/test/`), `wasm_host.c` (webbemulatorn).
+   portade ur blonda-motor: SLITEN och reverbet RUM, med test mot originalet i `gemensamt/test/`; PUMP, ducking i
+   takt, finns bara här), `wasm_host.c` (webbemulatorn).
    En modul tar in dem via `sources =` och `includes =` i sin `module.cfg`; byggskripten läser listan därifrån.
 6. **Två kärnor**: tunga motorer delar upp rösterna och räknar en del på kärna 1 med fm1-dock:s `c1_run` / `c1_wait`
-   (se `moduler/bris`), med reserv på kärna 0 när den inte lånas ut.
+   (se `moduler/bris`), med reserv på kärna 0 när den inte lånas ut. Ett jobb på kärna 1 har 2,8 KiB stack och får
+   inte anropa värden. Kärna 0 väntar på jobbet inne i ljudavbrottet: lägg det så att kärna 0 har eget att räkna
+   under tiden (BRIS: klangen i RUM räknas medan kärna 0 gör ensemble och eko).
 7. **GPL-3.0-only**, som fm1-dock och Felucca.
 8. **Webbemulatorn tar med alla moduler** (`web/bygg.sh` bygger varje mapp i `moduler/`, väljaren överst på sidan).
    En modul med `HB_F_PANEL` (som PULS) får tangenterna och OCT-knapparna som händelser och tangenternas lysdioder

@@ -8,16 +8,49 @@
  *   SELECT             nästa / förra sidan
  *   ALGORITHM          ERA: inbyggt band och lofi efter BRIS. 0 MODERN (rent, som BRIS), 1..60 TAPE (kassett som
  *                      slits mer och mer), 61..100 LOFI (digital: färre bitar och lägre samplingsfrekvens). MIDI CC 77.
- *   SEL FILTER · EDIT OSC · ENV EG2/EG1 · LFO 1/2 · FX · GLO VOICE/PLAY   (tryck igen: sidans andra halva)
- *   SAVE               sparar ljudet som det är nu; det laddas när BRIS startar nästa gång
+ *   SEL FILTER · EDIT OSC · ENV EG2/EG1 · LFO 1/2 · FX · GLO VOICE/PLAY   (tryck igen: sidans nästa del)
+ *   FX                 FX (ensemble, eko) · RUM, RUM TONE, RUM SPACE (reverbet BLONDA RUM efter BRIS) · PUMP
+ *                      (ducking i takt: klangen eller allt viker undan på slaget; egen takt eller MIDI-klocka).
+ *                      Reverb och pump hör till modulen, inte till ljudet: de ligger kvar när man byter ljud.
+ *                      MIDI CC 91 = reverbets mix, CC 92 = pumpens djup.
+ *   SAVE               sparar ljudet som det är nu, med ERA, reverb och pump; det laddas när BRIS startar nästa gång
  * Med KNOBS CC påslaget i fm1-dock kommer rattarna som CC 74, 71, 73, 72: cutoff, resonans, EG2 attack, release. */
 #include "hb_module.h"
 #include "bris_fm1.h"
 #include "sliten_fm1.h"
+#include "rum_fm1.h"
+#include "pump_fm1.h"
+
+#ifndef HB_F_MIDI_RT
+#define HB_F_MIDI_RT 16u                        /* nyare fm1-dock: MIDI-klockan kommer i ljudavbrottet (annars huvudloopen) */
+#endif
+#define BRIS_VERSION "V3.0"                     /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
 
 static const hb_host_t *H;
 static char *put_int(char *s, int32_t v);
 static char *put_str(char *s, const char *a);
+static float clampf(float x, float lo, float hi);
+
+/* ------------------------------------------------------------------ modulens egna effekter efter BRIS: RUM och PUMP */
+/* numreras efter BRIS parametrar, så att sidorna kan blanda dem */
+enum { XP_rmix = BP_N, XP_rsize, XP_rdecay, XP_rtype, XP_rlowc, XP_rhighc, XP_rdamp, XP_rmodd,
+       XP_rpredel, XP_rwidth, XP_rduck, XP_rout, XP_pdepth, XP_prate, XP_ptarget, XP_bpm, XP_END };
+#define XN (XP_END - BP_N)
+typedef struct { const char *name; float lo, hi, def; uint8_t integer; int8_t rum; } xparam_t;
+static const xparam_t XPAR[XN] = {
+    {"Reverb Mix", 0.f, 1.f, 0.f, 0, RU_wet}, {"Reverb Size", 0.f, 1.f, 0.55f, 0, RU_size},
+    {"Reverb Decay", 0.f, 1.f, 0.5f, 0, RU_decay}, {"Reverb Type", 0.f, 1.f, 0.f, 1, RU_shape},
+    {"Low Cut", 0.f, 1.f, 0.25f, 0, RU_lowc}, {"High Cut", 0.f, 1.f, 1.f, 0, RU_highc},
+    {"Damping", 0.f, 1.f, 0.45f, 0, RU_damp}, {"Movement", 0.f, 1.f, 0.35f, 0, RU_modd},
+    {"Predelay", 0.f, 1.f, 0.15f, 0, RU_predel}, {"Width", 0.f, 1.f, 1.f, 0, RU_width},
+    {"Duck", 0.f, 1.f, 0.f, 0, RU_duck}, {"Reverb Level", 0.f, 1.f, 0.75f, 0, RU_outv},
+    {"Pump Depth", 0.f, 1.f, 0.f, 0, -1}, {"Pump Rate", 0.f, 4.f, 2.f, 1, -1},
+    {"Pump Target", 0.f, 1.f, 0.f, 1, -1}, {"Tempo", 40.f, 240.f, 120.f, 1, -1},
+};
+static float xv[XN];
+static rum_t rum;
+static pump_t pump;
+static volatile int rum_on;                     /* reverbet räknas (mix över 0) */
 
 /* ------------------------------------------------------------------ sidor */
 typedef struct { const char *title; uint8_t btn; int8_t p[4]; } page_t;
@@ -29,6 +62,10 @@ static const page_t PAGES[] = {
     {"LFO", HB_BTN_LFO, {BP_lwave, BP_lrate, BP_lfoosc, BP_lfocut}},
     {"LFO MOD", HB_BTN_LFO, {BP_lfopwm, BP_lfoamp, BP_mwosc, BP_mwcut}},
     {"FX", HB_BTN_FX, {BP_chorus, BP_dtime, BP_dfb, BP_dmix}},
+    {"RUM", HB_BTN_FX, {XP_rmix, XP_rsize, XP_rdecay, XP_rtype}},
+    {"RUM TONE", HB_BTN_FX, {XP_rlowc, XP_rhighc, XP_rdamp, XP_rmodd}},
+    {"RUM SPACE", HB_BTN_FX, {XP_rpredel, XP_rwidth, XP_rduck, XP_rout}},
+    {"PUMP", HB_BTN_FX, {XP_pdepth, XP_prate, XP_ptarget, XP_bpm}},
     {"VOICE", HB_BTN_GLO, {BP_lage, BP_porta, BP_uniint, BP_vol}},
     {"PLAY", HB_BTN_GLO, {BP_velf, BP_vela, BP_bendr, BP_kbda}},
 };
@@ -36,13 +73,21 @@ static const page_t PAGES[] = {
 
 /* ------------------------------------------------------------------ tillstånd */
 #define SET_MAGIC 0x53495242u                   /* "BRIS" */
-#define SET_VERSION 2                           /* 2: era */
+#define SET_VERSION 3                           /* 2: era, 3: reverb och pump */
 typedef struct {
     uint32_t magic;
     uint8_t version, preset, page, edited;
     float p[BP_N];
     float era;
-} settings_t;                                   /* 156 byte (värden upp till 240) */
+} settings2_t;                                  /* version 2: 156 byte */
+typedef struct {
+    uint32_t magic;
+    uint8_t version, preset, page, edited;
+    float p[BP_N];
+    float era;
+    uint8_t x[XN];                              /* reverb och pump: 0..100 (heltal och tempo som de är) */
+} settings_t;                                   /* 172 byte (fm1-dock tar upp till 240) */
+typedef char settings_fits[sizeof(settings_t) <= 240 ? 1 : -1];
 
 static int preset = 1, page, edited;
 static volatile uint32_t saved_ms;              /* när SAVE trycktes (meddelandet visas en stund) */
@@ -121,27 +166,62 @@ static char *put_int(char *s, int32_t v)
 }
 static char *put_str(char *s, const char *a) { while (*a) *s++ = *a++; *s = 0; return s; }
 
+/* en parameter på en sida: BRIS egen (under BP_N) eller modulens (RUM, PUMP) */
+static float par_get(int p) { return p < BP_N ? bris_get(p) : xv[p - BP_N]; }
+static const char *par_name(int p) { return p < BP_N ? BRIS_PARAMS[p].name : XPAR[p - BP_N].name; }
+static float par_lo(int p) { return p < BP_N ? BRIS_PARAMS[p].lo : XPAR[p - BP_N].lo; }
+static float par_hi(int p) { return p < BP_N ? BRIS_PARAMS[p].hi : XPAR[p - BP_N].hi; }
+static int par_integer(int p) { return p < BP_N ? BRIS_PARAMS[p].integer : XPAR[p - BP_N].integer; }
+
+/* takten som visas: klockans när den kommer, annars den egna */
+static int32_t tempo_shown(void) { return (int32_t)(pump_tempo(&pump) + 0.5f); }
+
 /* parameterns värde som text, och som 0..1000 för stapeln */
 static int32_t value_text(int p, char *s)
 {
     static const char *const VF[3] = {"SAW", "PULSE", "SAW+PULSE"};
     static const char *const LW[5] = {"TRIANGLE", "RAMP UP", "RAMP DOWN", "SQUARE", "S&H"};
     static const char *const MD[4] = {"POLY ST", "POLY", "MONO", "UNISON"};
-    const bris_param_t *d = &BRIS_PARAMS[p];
-    float v = bris_get(p);
-    int32_t bar = (int32_t)((v - d->lo) / (d->hi - d->lo) * 1000.f + 0.5f);
+    static const char *const PR[5] = {"1/1", "1/2", "1/4", "1/8", "1/16"};
+    float v = par_get(p), lo = par_lo(p), hi = par_hi(p);
+    int32_t bar = (int32_t)((v - lo) / (hi - lo) * 1000.f + 0.5f);
     int32_t iv = (int32_t)(v < 0.f ? v - 0.5f : v + 0.5f);
     if (p == BP_vform) put_str(s, VF[iv < 0 ? 0 : iv > 2 ? 2 : iv]);
     else if (p == BP_lwave) put_str(s, LW[iv < 0 ? 0 : iv > 4 ? 4 : iv]);
     else if (p == BP_lage) put_str(s, MD[iv < 0 ? 0 : iv > 3 ? 3 : iv]);
     else if (p == BP_uniint) { if (iv > 0) *s++ = '+'; put_str(put_int(s, iv), " ST"); }
     else if (p == BP_bendr) put_str(put_int(s, iv), " ST");
+    else if (p == XP_rtype) put_str(s, iv ? "ROOM" : "HALL");
+    else if (p == XP_prate) put_str(s, PR[iv < 0 ? 0 : iv > 4 ? 4 : iv]);
+    else if (p == XP_ptarget) put_str(s, iv ? "ALL" : "REVERB");
+    else if (p == XP_bpm) {                     /* med MIDI-klocka: klockans takt */
+        if (pump.ext) { put_int(put_str(s, "EXT "), tempo_shown()); bar = (tempo_shown() - 40) * 1000 / 200; }
+        else put_str(put_int(s, iv), " BPM");
+    }
     else put_int(s, (int32_t)(v * 100.f + (v < 0.f ? -0.5f : 0.5f)));   /* 0..100 (kbda -100..100) */
     return bar;
 }
 
+/* modulens egna effekter: värdet till reverbet eller pumpen. Reverbet nollställs när det slås på (mix från 0). */
+static void set_x(int p, float v)
+{
+    const xparam_t *d = &XPAR[p - BP_N];
+    v = clampf(v, d->lo, d->hi);
+    if (d->integer) v = (float)(int32_t)(v + 0.5f);
+    xv[p - BP_N] = v;
+    if (d->rum >= 0) rum_set(&rum, d->rum, v);
+    if (p == XP_rmix) {
+        if (v > 0.f && !rum_on) { rum_reset(&rum); rum_on = 1; }
+        else if (v <= 0.f) rum_on = 0;
+    }
+    else if (p == XP_pdepth) pump.depth = v;
+    else if (p == XP_prate) pump.rate = (int32_t)v;
+    else if (p == XP_bpm) pump.bpm = v;
+}
+
 static void set_param(int p, float v)
 {
+    if (p >= BP_N) { set_x(p, v); return; }     /* hör till modulen, inte till ljudet: ingen stjärna */
     bris_set(p, v);
     edited = 1;
 }
@@ -164,20 +244,43 @@ static void leds(void)
 /* ------------------------------------------------------------------ ljud */
 static float bufL[BRIS_MAXN], bufR[BRIS_MAXN];
 
-/* den andra kärnan: röst 3..5 där, när fm1-dock lånar ut den (c1_run), annars allt på kärna 0 */
+/* Den andra kärnan, när fm1-dock lånar ut den (c1_run), annars allt på kärna 0:
+ *   röst 3..5 medan kärna 0 räknar röst 0..2,
+ *   sedan reverbets klang medan kärna 0 räknar ensemble och eko.
+ * Klangen för ett block räknas ur ljudet före blocket (rum_tail med min_delay = blockets längd), så den kan gå
+ * samtidigt. Det gör en predelay kortare än ett block (5,8 ms) lika lång som blocket; längre är exakt. */
 static int c1_ok;
+static float wetL[BRIS_MAXN], wetR[BRIS_MAXN], pgain[BRIS_MAXN];
 static void c1_voices(uint32_t arg) { (void)arg; bris_render_voices(3, BRIS_NV, 1); }
+static void c1_tail(uint32_t k) { rum_tail(&rum, wetL, wetR, k, k); }
 
 static void render(int32_t *out, uint32_t n)
 {
+    pump_begin(&pump, H->ticks());
     while (n) {
         uint32_t k = n > BRIS_MAXN ? BRIS_MAXN : n, i;
-        int two;
+        int two, rv = rum_on, tail_out = 0, pumping, target = (int)xv[XP_ptarget - BP_N];
         bris_render_begin(k);
         two = c1_ok && H->c1_run(c1_voices, 0);
         bris_render_voices(0, two ? 3 : BRIS_NV, 0);
-        if (two && H->c1_wait() != 0) c1_voices(0);   /* kärna 1 blev inte klar (och är tagen nu): räkna här */
+        if (two && H->c1_wait() != 0) { c1_voices(0); two = 0; }   /* kärna 1 blev inte klar (och är tagen nu): räkna här */
+        if (rv) {
+            if (two && H->c1_run(c1_tail, k)) tail_out = 1;
+            else c1_tail(k);
+        }
         bris_render_end(bufL, bufR);
+        pumping = pump.depth > 0.f || pump.g < 0.9999f;
+        pump_gain(&pump, pgain, k);
+        if (rv) {
+            if (tail_out && H->c1_wait() != 0) {                    /* klangen blev inte klar: tyst klang i det här blocket */
+                for (i = 0; i < k; i++) wetL[i] = wetR[i] = 0.f;
+                rum_resync(&rum);
+            }
+            if (pumping && target == 0) for (i = 0; i < k; i++) { wetL[i] *= pgain[i]; wetR[i] *= pgain[i]; }
+            rum_feed(&rum, bufL, bufR, k);
+            rum_mix(&rum, bufL, bufR, wetL, wetR, k);
+        }
+        if (pumping && target != 0) for (i = 0; i < k; i++) { bufL[i] *= pgain[i]; bufR[i] *= pgain[i]; }
         if (tape_on) {
             sliten_process(&tape, bufL, bufR, k);
             if (era <= 0 && tape.sWet < 0.0005f) tape_on = 0;   /* helt uttonad: räkna inte längre */
@@ -214,12 +317,15 @@ static void cc(uint32_t ch, uint32_t num, uint32_t val)
     case 73: set_param(BP_aa, v); break;
     case 72: set_param(BP_ar, v); break;
     case 77: set_era((int32_t)(val * 100u + 63u) / 127); break;   /* ERA */
+    case 91: set_x(XP_rmix, v); break;          /* reverbets mix */
+    case 92: set_x(XP_pdepth, v); break;        /* pumpens djup */
     default: break;
     }
 }
 
 static void midi(uint32_t st, uint32_t d1, uint32_t d2)
 {
+    if (st >= 0xF8u) { pump_midi(&pump, st, H->ticks()); return; }   /* klocka och transport: pumpen följer */
     switch (st & 0xF0u) {
     case 0x90: note(st & 15u, d1, d2); break;
     case 0x80: note(st & 15u, d1, 0); break;
@@ -238,9 +344,8 @@ static void midi(uint32_t st, uint32_t d1, uint32_t d2)
 /* ------------------------------------------------------------------ panelen */
 static void turn(int p, int32_t clicks)
 {
-    const bris_param_t *d = &BRIS_PARAMS[p];
-    float step = d->integer ? 1.f : (d->hi - d->lo) * 0.01f;
-    set_param(p, bris_get(p) + step * (float)clicks);
+    float step = par_integer(p) ? 1.f : (par_hi(p) - par_lo(p)) * 0.01f;
+    set_param(p, par_get(p) + step * (float)clicks);
 }
 
 static void ui(uint32_t ev, int32_t arg)
@@ -260,6 +365,7 @@ static void ui(uint32_t ev, int32_t arg)
         s.magic = SET_MAGIC; s.version = SET_VERSION; s.preset = (uint8_t)preset; s.page = (uint8_t)page; s.edited = (uint8_t)edited;
         for (i = 0; i < BP_N; i++) s.p[i] = bris_get(i);
         s.era = (float)era;
+        for (i = 0; i < XN; i++) s.x[i] = (uint8_t)(XPAR[i].integer ? xv[i] + 0.5f : xv[i] * 100.f + 0.5f);
         H->save(&s, sizeof s);
         saved_ms = H->ms() | 1u;
         return;
@@ -286,7 +392,7 @@ static void draw_row(int r)
 
     int32_t tw = H->text_w(0, s);
     tw = tw > 90 ? 90 : tw;
-    H->text(8, y, 142, 0, BRIS_PARAMS[p].name, C_LBL, 0);
+    H->text(8, y, 142, 0, par_name(p), C_LBL, 0);
     H->fill(150, y, 82, 16, C_BLACK);           /* värdet högerställt */
     H->text(232 - tw, y, tw, 0, s, C_VAL, 0);
     w = bar * 224 / 1000;
@@ -311,7 +417,8 @@ static void draw(uint32_t full)
         e = put_int(s, preset);
         if (preset < 10) { s[1] = s[0]; s[0] = '0'; s[2] = 0; e = s + 2; }
         H->text(8, 28, 40, 0, s, C_HEAD, 0);
-        H->text(48, 28, 112, 0, preset == 0 ? "INIT" : preset <= BRIS_FACTORY ? "BRIS FACTORY" : "BLONDA", C_HEAD, 0);
+        H->fill(48, 28, 112, 16, C_BLACK);
+        H->text(48, 28, 112, 0, preset == 0 ? "INIT " BRIS_VERSION : preset <= BRIS_FACTORY ? "FACTORY " BRIS_VERSION : "BLONDA " BRIS_VERSION, C_HEAD, 0);
         e = put_str(s, name);
         if (edited) put_str(e, "*");
         H->fill(8, 44, 224, 32, C_BLACK);
@@ -333,7 +440,7 @@ static void draw(uint32_t full)
     }
     for (r = 0; r < 4; r++) {
         int p = PAGES[page].p[r];
-        int32_t v = (int32_t)(bris_get(p) * 1000.f);
+        int32_t v = p == XP_bpm ? tempo_shown() + (pump.ext ? 1000 : 0) : (int32_t)(par_get(p) * 1000.f);
         if (shown.row[r] != p || shown.val[r] != v) { draw_row(r); shown.row[r] = p; shown.val[r] = v; }
     }
     if (vm != shown.voices) {                   /* sex prickar: rösterna som låter */
@@ -355,6 +462,7 @@ static void draw(uint32_t full)
 static int init(const hb_host_t *h)
 {
     settings_t s;
+    int i, ok;
     H = h;
     saved_ms = 0;
     c1_ok = HB_HOST_HAS(H, c1_wait);
@@ -362,13 +470,23 @@ static int init(const hb_host_t *h)
     sliten_init(&tape);
     era = 0; tape_on = 0;
     era_apply();
-    if (H->load(&s, sizeof s) == 0 && s.magic == SET_MAGIC && s.version == SET_VERSION && s.preset < BRIS_NPRESETS) {
-        int i;
+    rum_init(&rum);
+    pump_init(&pump);
+    rum_on = 0;
+    for (i = 0; i < XN; i++) set_x(BP_N + i, XPAR[i].def);
+    /* sparat: version 3, eller version 2 (före reverb och pump: de får sina standardvärden) */
+    ok = H->load(&s, sizeof s) == 0 && s.magic == SET_MAGIC && s.version == SET_VERSION;
+    if (!ok && H->load(&s, sizeof(settings2_t)) == 0 && s.magic == SET_MAGIC && s.version == 2) {
+        ok = 1;
+        for (i = 0; i < XN; i++) s.x[i] = (uint8_t)(XPAR[i].integer ? XPAR[i].def + 0.5f : XPAR[i].def * 100.f + 0.5f);
+    }
+    if (ok && s.preset < BRIS_NPRESETS) {
         preset = s.preset;
         page = s.page < NPAGES ? s.page : 0;
         for (i = 0; i < BP_N; i++) bris_set(i, s.p[i]);
         edited = s.edited;
         set_era((int32_t)s.era);
+        for (i = 0; i < XN; i++) set_x(BP_N + i, XPAR[i].integer ? (float)s.x[i] : (float)s.x[i] * 0.01f);
     } else {
         load_preset(1);                         /* Poly Magic */
     }
@@ -382,6 +500,7 @@ static void release(void)
     bris_all_notes_off();
     bris_reset();
     sliten_reset(&tape);
+    rum_on = 0;
 }
 
-HB_DESC = {HB_ABI, "BRIS", init, release, note, cc, render, ui, draw, 0, 0, 0, midi};
+HB_DESC = {HB_ABI, "BRIS", init, release, note, cc, render, ui, draw, 0, 0, HB_F_MIDI_RT, midi};

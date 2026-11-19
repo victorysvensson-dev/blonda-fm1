@@ -20,8 +20,11 @@
 #define BRIS_K 16                               /* sampel per styrblock */
 #endif
 #define BRIS_NV 6
-#define BRIS_CHN 4096                           /* ensemblens buffert, som originalet */
-#define BRIS_DLN (BRIS_SR + 64)                 /* ekot: 1 s (int16, Q15: originalets 52000 float får inte plats) */
+#define BRIS_CHN 512                            /* ensemblens buffert: längsta fördröjningen är 7 + 2,9 ms = 437 sampel
+                                                 * (originalets 4096 ger samma ljud, men minnet behövs till reverbet) */
+#define BRIS_DLN 36544                          /* ekot: 0,83 s (int16, Q15). Originalet går till 1 s (dtime över 0,91);
+                                                 * inget fabriksljud går över 0,64 s. Resten av modulens minne (272 KiB)
+                                                 * är reverbet BLONDA RUM, som modulen lägger efter BRIS. */
 
 void bris_init(void);                           /* nollställer allt och laddar init-ljudet */
 void bris_reset(void);                          /* tystar och nollställer ljudet, behåller parametrarna */

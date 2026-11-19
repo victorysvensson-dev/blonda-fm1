@@ -5,7 +5,7 @@ fm1-dock installeras en gång på FM-1, och modulerna ligger sedan sida vid sida
 
 | Modul | Vad | Ljudet kommer från |
 |---|---|---|
-| [`moduler/bris`](moduler/bris) | BLONDA BRIS – sexstämmig analog poly efter GS Music Bree6, 90 ljud | `blonda-motor` (BRIS), testad mot den |
+| [`moduler/bris`](moduler/bris) | BLONDA BRIS – sexstämmig analog poly efter GS Music Bree6, 90 ljud. Efter den: reverbet RUM, PUMP (ducking i takt) och ERA (band och lofi) | `blonda-motor` (BRIS, RUM, SLITEN), testad mot den |
 | [`moduler/one`](moduler/one) | BLONDA ONE – BRIS möter Moog: sexstämmig poly med tre oscillatorer per röst, brus, drivning och en stege som självsvänger, 49 ljud | `blonda-motor` (ONE), testad mot den |
 | [`moduler/puls`](moduler/puls) | BLONDA PULS – trummaskin: åtta syntade trumljud, 16-stegssekvenser, sex mönster, 10 trumset | `blonda-motor` (PULS), testad mot den |
 

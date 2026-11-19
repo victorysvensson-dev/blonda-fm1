@@ -11,6 +11,7 @@
 #include <string.h>
 #include <math.h>
 #include "hb_module.h"
+#include "bris_presets.h"
 
 /* ---- skärmen: 240 x 240 RGB565, som panelen får den (gfx.c skickar byten omvända) */
 static uint16_t fb[240 * 240];
@@ -36,8 +37,10 @@ static void h_fill(int32_t x, int32_t y, int32_t w, int32_t h, uint16_t c)
             if (i >= 0 && i < 240 && j >= 0 && j < 240) fb[j * 240 + i] = c;
 }
 static int bad_draw;
+static int seen_ext;                            /* en text som börjar med "EXT " har ritats (pumpen följer MIDI-klockan) */
 static void h_text(int32_t x, int32_t y, int32_t w, uint32_t big, const char *s, uint16_t fg, uint32_t center)
 {
+    if (!strncmp(s, "EXT ", 4)) seen_ext = 1;
     const felucca_font_t *f = big ? &FONT_L : &FONT_S;
     if (x < 0 || y < 0 || w <= 0 || x + w > 240 || y + (int32_t)f->h > 240) { bad_draw++; return; }
     if (y < HB_TOP) bad_draw++;
@@ -174,10 +177,18 @@ int main(int argc, char **argv)
     btn(HB_BTN_ENV); M->draw(0); shot(base, n++);   /* 04: EG2 */
     btn(HB_BTN_ENV); M->draw(0); shot(base, n++);   /* 05: EG1 */
     btn(HB_BTN_LFO); M->draw(0); shot(base, n++);   /* 06 */
-    btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 07 */
-    btn(HB_BTN_GLO); M->draw(0); shot(base, n++);   /* 08 */
-    btn(HB_BTN_GLO); M->draw(0); shot(base, n++);   /* 09 */
-    btn(HB_BTN_EDIT); M->draw(0); shot(base, n++);   /* 10: OSC */
+    btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 07: FX */
+    btn(HB_BTN_FX); enc(HB_ENC_KNOB1, 35); enc(HB_ENC_KNOB4, 1); M->draw(0); shot(base, n++);    /* 08: RUM, mix 35, ROOM */
+    enc(HB_ENC_KNOB4, -1);
+    btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 09: RUM TONE */
+    btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 10: RUM SPACE */
+    btn(HB_BTN_FX); enc(HB_ENC_KNOB1, 60); enc(HB_ENC_KNOB2, 1); enc(HB_ENC_KNOB3, 1); enc(HB_ENC_KNOB4, 4); M->draw(0); shot(base, n++);   /* 11: PUMP */
+    enc(HB_ENC_KNOB1, -100); enc(HB_ENC_KNOB3, -1);
+    btn(HB_BTN_FX);                                  /* runt till FX igen */
+    btn(HB_BTN_FX); enc(HB_ENC_KNOB1, -100);         /* reverbet av igen */
+    btn(HB_BTN_GLO); M->draw(0); shot(base, n++);   /* 12 */
+    btn(HB_BTN_GLO); M->draw(0); shot(base, n++);   /* 13 */
+    btn(HB_BTN_EDIT); M->draw(0); shot(base, n++);   /* 14: OSC */
     CHECK(leds[HB_BTN_EDIT] == 1u && leds[HB_BTN_SEL] == 2u, "lysdioderna visar sidan");
 
     for (i = 0; i < 200; i++) enc(HB_ENC_PRESETS, 1);   /* runt och runt */
@@ -231,7 +242,7 @@ int main(int argc, char **argv)
                 for (i2 = 0; i2 < 512; i2++) { if (o[i2] > 32767 || o[i2] < -32767) clipped++; if (abs(o[i2]) > pk[k]) pk[k] = abs(o[i2]); }
             }
             M->note(0, 57, 0); M->note(0, 64, 0);
-            if (k) { M->draw(0); shot(base_name, n++); }   /* 11: TAPE 35, 12: LOFI 85 */
+            if (k) { M->draw(0); shot(base_name, n++); }   /* 15: TAPE 35, 16: LOFI 85 */
             for (b = 0; b < 1200; b++) { memset(out, 0, sizeof out); M->render(out, 256); }   /* ~7 s: eko och hölje klingar ut */
             quiet[k] = 0;
             for (b = 0; b < 80; b++) { memset(out, 0, sizeof out); M->render(out, 256); for (i2 = 0; i2 < 512; i2++) if (abs(out[i2]) > quiet[k]) quiet[k] = abs(out[i2]); }
@@ -259,41 +270,157 @@ int main(int argc, char **argv)
         }
     }
 
-    /* två kärnor: samma ljud som allt på en kärna (summan av rösterna i en annan ordning: avrundning bara) */
+    /* RUM (reverbet): av = BRIS orörd (testerna ovan); på = klangen ligger kvar efter tonen, klipper inte, och dör
+     * ut till exakt tystnad. Mäts som topp per block efter att tonen släppts. */
+    {
+        int32_t out[512], after[2] = {0, 0}, late = 0, pk6 = 0, clip0 = clipped;
+        int pass, b, i2;
+        for (pass = 0; pass < 2; pass++) {
+            M->release(); M->init(&HOST);
+            M->midi(0xC0, 5, 0);                         /* Unison Bass: kort, torrt ljud utan eko */
+            M->midi(0xB0, 91, pass ? 64 : 0);           /* reverbets mix: av, sedan halv */
+            M->note(0, 48, 110);
+            for (b = 0; b < 40; b++) { memset(out, 0, sizeof out); M->render(out, 256); }
+            M->note(0, 48, 0);
+            for (b = 0; b < 170; b++) {                  /* 1 s efter släpp */
+                memset(out, 0, sizeof out); M->render(out, 256);
+                if (b >= 120) for (i2 = 0; i2 < 512; i2++) if (abs(out[i2]) > after[pass]) after[pass] = abs(out[i2]);
+            }
+            if (pass) {
+                for (b = 0; b < 4000; b++) { memset(out, 0, sizeof out); M->render(out, 256); }   /* 23 s till */
+                for (b = 0; b < 40; b++) { memset(out, 0, sizeof out); M->render(out, 256); for (i2 = 0; i2 < 512; i2++) if (abs(out[i2]) > late) late = abs(out[i2]); }
+                M->midi(0xC0, 1, 0);
+                M->midi(0xB0, 91, 127);                  /* bara klang, sex toner hårt */
+                M->note(0, 36, 127); M->note(0, 48, 127); M->note(0, 55, 127); M->note(0, 60, 127); M->note(0, 64, 127); M->note(0, 67, 127);
+                for (b = 0; b < 500; b++) { memset(out, 0, sizeof out); M->render(out, 256); for (i2 = 0; i2 < 512; i2++) { if (out[i2] > 32767 || out[i2] < -32767) clipped++; if (abs(out[i2]) > pk6) pk6 = abs(out[i2]); } }
+                M->midi(0xB0, 123, 0);
+            }
+        }
+        printf("  RUM: 0,7-1 s efter släpp: utan reverb %d, med %d; efter 24 s: %d; sex toner med full mix: topp %d\n", after[0], after[1], late, pk6);
+        CHECK(after[0] < 30 && after[1] > 300, "RUM: klangen ligger kvar efter tonen (och utan reverb är det tyst)");
+        CHECK(late == 0, "RUM: klangen dör ut till helt tyst");
+        CHECK(pk6 > 3000 && clipped == clip0, "RUM: full mix med sex toner hörs och klipper inte");
+    }
+    /* PUMP: allt duckar på slaget. 120 BPM, fjärdedelar, fullt djup, mål ALL: nivån strax efter varje slag (var
+     * 0,5 s från start) är mycket lägre än en kvarts sekund senare. Med mål REVERB rörs inte det torra ljudet. */
+    {
+        int32_t out[512];
+        int target, b, i2;
+        double lo[2] = {0, 0}, hi[2] = {0, 0};
+        for (target = 1; target >= 0; target--) {
+            M->release(); M->init(&HOST);
+            M->midi(0xC0, 0, 0);                         /* init: en ton som står kvar */
+            btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX);   /* PUMP-sidan */
+            enc(HB_ENC_KNOB1, 100); enc(HB_ENC_KNOB3, target ? 1 : -1);
+            M->note(0, 60, 100);
+            for (b = 0; b < 86 * 6; b++) {               /* sex slag */
+                double e = 0;
+                memset(out, 0, sizeof out); M->render(out, 256);
+                for (i2 = 0; i2 < 512; i2++) e += (double)out[i2] * out[i2];
+                if (b >= 86 * 2) {                       /* efter anslaget */
+                    int at = b % 86;                     /* block sedan slaget (86 block = 0,499 s) */
+                    if (at >= 2 && at <= 4) lo[target] += e;
+                    if (at >= 60 && at <= 62) hi[target] += e;
+                }
+            }
+            M->note(0, 60, 0);
+            if (target) { M->draw(0); shot(base, n++); }   /* 17: PUMP-sidan, ALL */
+        }
+        printf("  PUMP: nivå på slaget mot mellan slagen: mål ALL %.1f dB, mål REVERB (reverbet av) %.1f dB\n",
+               10 * log10(lo[1] / hi[1] + 1e-30), 10 * log10(lo[0] / hi[0] + 1e-30));
+        CHECK(10 * log10(lo[1] / hi[1] + 1e-30) < -12, "PUMP: allt duckar på slaget (mål ALL)");
+        CHECK(fabs(10 * log10(lo[0] / hi[0] + 1e-30)) < 1.0, "PUMP: mål REVERB rör inte det torra ljudet");
+    }
+    /* MIDI-klocka: pumpen följer den, och skärmen visar klockans takt (EXT) */
+    {
+        int32_t out[512];
+        int b, t = 0;
+        M->release(); M->init(&HOST);
+        btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX);
+        M->midi(0xFA, 0, 0);
+        for (b = 0; b < 700; b++) {                      /* 4 s; klockan i 100 BPM räknat i värdens millisekunder */
+            while (t <= (int)(b * 6)) { M->midi(0xF8, 0, 0); t += 25; }
+            memset(out, 0, sizeof out); M->render(out, 256);
+            now_ms += 6;
+        }
+        seen_ext = 0; M->draw(1);
+        CHECK(seen_ext, "MIDI-klocka: skärmen visar klockans takt (EXT)");
+        shot(base, n++);                                 /* 18: PUMP med klocka */
+        for (b = 0; b < 500; b++) { memset(out, 0, sizeof out); M->render(out, 256); now_ms += 6; }   /* 3 s utan klocka */
+        seen_ext = 0; M->draw(1);
+        CHECK(!seen_ext, "klockan tystnar: egen takt igen");
+    }
+
+    /* två kärnor: samma ljud som allt på en kärna (summan av rösterna i en annan ordning: avrundning bara).
+     * Med reverbet på räknas klangen också på kärna 1. Då blir skillnaden större: den lilla avrundningsskillnaden i
+     * rösterna gör att reverbets 16-bitarslinjer avrundar olika, så de två körningarna skiljer sig med reverbets
+     * eget avrundningsbrus (långt under klangen). */
     {
         static int32_t one[2][256 * 2 * 60];
-        int pass, b, i2;
-        double e = 0, d = 0;
-        for (pass = 0; pass < 2; pass++) {
-            c1_lend = pass == 0;
-            M->release(); M->init(&HOST);
-            M->midi(0xC0, 1, 0);
-            M->note(0, 48, 100); M->note(0, 55, 100); M->note(0, 60, 100); M->note(0, 64, 100); M->note(0, 67, 100); M->note(0, 72, 100);
-            for (b = 0; b < 60; b++) { memset(one[pass] + b * 512, 0, 512 * 4); M->render(one[pass] + b * 512, 256); }
+        int pass, b, i2, fx;
+        for (fx = 0; fx < 2; fx++) {
+            double e = 0, d = 0, db;
+            int jobs0 = c1_jobs;
+            for (pass = 0; pass < 2; pass++) {
+                c1_lend = pass == 0;
+                M->release(); M->init(&HOST);
+                M->midi(0xC0, 1, 0);
+                if (fx) { M->midi(0xB0, 91, 80); M->midi(0xB0, 92, 100); }   /* reverb och pump på */
+                M->note(0, 48, 100); M->note(0, 55, 100); M->note(0, 60, 100); M->note(0, 64, 100); M->note(0, 67, 100); M->note(0, 72, 100);
+                for (b = 0; b < 60; b++) { memset(one[pass] + b * 512, 0, 512 * 4); M->render(one[pass] + b * 512, 256); }
+            }
+            c1_lend = 1;
+            for (i2 = 0; i2 < 256 * 2 * 60; i2++) { e += (double)one[0][i2] * one[0][i2]; d += (double)(one[0][i2] - one[1][i2]) * (one[0][i2] - one[1][i2]); }
+            db = 10 * log10(d / (e + 1e-30) + 1e-30);
+            printf("  två kärnor%s: %d jobb, skillnad mot en kärna %.1f dB\n", fx ? " med reverb och pump" : "", c1_jobs - jobs0, db);
+            if (!fx) CHECK(c1_jobs - jobs0 == 60 && db < -80, "två kärnor låter som en");
+            else CHECK(c1_jobs - jobs0 == 120 && db < -60, "två kärnor låter som en också med reverb och pump (klangen på kärna 1)");
+            M->midi(0xB0, 123, 0);
         }
-        c1_lend = 1;
-        for (i2 = 0; i2 < 256 * 2 * 60; i2++) { e += (double)one[0][i2] * one[0][i2]; d += (double)(one[0][i2] - one[1][i2]) * (one[0][i2] - one[1][i2]); }
-        printf("  två kärnor: %d jobb, skillnad mot en kärna %.1f dB\n", c1_jobs, 10 * log10(d / (e + 1e-30) + 1e-30));
-        CHECK(c1_jobs > 0 && 10 * log10(d / (e + 1e-30) + 1e-30) < -80, "två kärnor låter som en");
-        M->midi(0xB0, 123, 0);
     }
 
     /* SAVE: sparas och kommer tillbaka vid nästa start */
     M->midi(0xC0, 7, 0);
     btn(HB_BTN_SEL); enc(HB_ENC_KNOB1, -15);
     enc(HB_ENC_ALGORITHM, 30);                  /* TAPE 30 sparas med ljudet */
+    M->midi(0xB0, 91, 51); M->midi(0xB0, 92, 76);   /* reverbets mix 0,40 och pumpens djup 0,60 sparas också */
+    btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX); enc(HB_ENC_KNOB4, -12);   /* tempo 108 */
+    btn(HB_BTN_SEL);
     btn(HB_BTN_SAVE);
-    now_ms += 10; M->draw(0); shot(base, n++);  /* 13: SAVED */
+    now_ms += 10; M->draw(0); shot(base, n++);  /* 19: SAVED */
     CHECK(store_n > 0 && store_n <= 240u, "inställningarna ryms i modulens 240 byte");
     {
-        float e; memcpy(&e, store + store_n - 4, 4);
-        printf("  sparat: %u byte, era %.1f\n", store_n, (double)e);
+        /* magic 4, version/preset/page/edited 4, p[BP_N] float, era float, sedan reverb och pump (en byte var) */
+        const uint8_t *x = store + 8 + BP_N * 4 + 4;
+        float e; memcpy(&e, store + 8 + BP_N * 4, 4);
+        printf("  sparat: %u byte, version %u, era %.1f, reverbmix %u, pumpdjup %u, tempo %u\n", store_n, store[4], (double)e, x[0], x[12], x[15]);
         CHECK(e == 30.f, "ERA sparas med ljudet (TAPE 30)");
+        CHECK(store[4] == 3 && x[0] == 40 && x[12] == 60 && x[15] == 108, "reverb, pump och tempo sparas");
     }
     M->release();
     CHECK(M->init(&HOST) == 0, "ny start");
-    M->draw(1); shot(base, n++);                /* 14: samma ljud, ändrat (*), TAPE 30 */
+    M->draw(1); shot(base, n++);                /* 20: samma ljud, ändrat (*), TAPE 30 */
     now_ms += 2000; M->draw(0);
+    {   /* kom tillbaka: spara igen utan att röra något ger samma bytes */
+        uint8_t was[240]; uint32_t was_n = store_n;
+        memcpy(was, store, sizeof was);
+        btn(HB_BTN_SAVE);
+        CHECK(store_n == was_n && !memcmp(was, store, was_n), "allt kommer tillbaka vid nästa start (sparat igen: samma)");
+    }
+    {   /* sparat av förra versionen (2: utan reverb och pump, 156 byte) laddas, med reverb och pump på standard */
+        uint8_t v2[240];
+        memcpy(v2, store, 8 + BP_N * 4 + 4);
+        v2[4] = 2; v2[5] = 9;                    /* version 2, ljud 9 */
+        memcpy(store, v2, 8 + BP_N * 4 + 4); store_n = 8 + BP_N * 4 + 4;
+        M->release();
+        CHECK(M->init(&HOST) == 0, "start med inställningar från version 2");
+        btn(HB_BTN_SAVE);
+        {
+            const uint8_t *x = store + 8 + BP_N * 4 + 4;
+            CHECK(store_n == 8 + BP_N * 4 + 4 + 16 && store[4] == 3 && store[5] == 9 && x[0] == 0 && x[12] == 0 && x[15] == 120,
+                  "version 2 laddas: ljudet kvar, reverb och pump av, sparas som version 3");
+        }
+    }
 
     snprintf(wpath, sizeof wpath, "%s.wav", base);
     write_wav(wpath);
