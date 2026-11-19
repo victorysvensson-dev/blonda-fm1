@@ -15,7 +15,7 @@
 #define BFX_CHN 512                             /* ensemblens buffert: längsta fördröjningen är 7 + 2,9 ms = 437 sampel
                                                  * (originalets 4096 ger samma ljud, men minnet behövs till reverbet) */
 #ifndef BFX_DLN
-#define BFX_DLN 36288                           /* ekot: 0,82 s (int16, Q15). Originalet går till 1 s (dtime över 0,91);
+#define BFX_DLN 36032                           /* ekot: 0,82 s (int16, Q15). Originalet går till 1 s (dtime över 0,91);
                                                  * inget fabriksljud går över 0,64 s. Resten av modulens minne (272 KiB)
                                                  * är reverbet BLONDA RUM, som modulen lägger efter motorerna. */
 #endif

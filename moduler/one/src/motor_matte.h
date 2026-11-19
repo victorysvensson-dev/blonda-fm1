@@ -5,6 +5,12 @@
 #define MOTOR_MATTE_H
 #include <stdint.h>
 
+/* Ett värde som klingar av mot noll (x -= x * k, x *= 0.9995) når till slut de denormala talen (under 1,2e-38) och
+ * fastnar där: x * k blir 0 och x ändras aldrig mer. FM-1:ans FPU räknar denormala tal mycket långsamt, så ett
+ * enda sådant värde som räknas varje sampel kostar en stor del av ljudavbrottet, också när allt är tyst. Under
+ * 1e-18 (-360 dB, långt under det som hörs eller syns i 24 bitar) blir värdet därför exakt noll. */
+#define FLUSH(x) (((x) < 1e-18f && (x) > -1e-18f) ? 0.f : (x))
+
 /* ------------------------------------------------------------------ snabb matte (ingen libm) */
 typedef union { float f; uint32_t u; } fbits_t;
 
@@ -60,6 +66,7 @@ static inline float tanh_f(float x)
     float x2;
     if (x > 4.97f) return 1.f;
     if (x < -4.97f) return -1.f;
+    if (x < 1e-15f && x > -1e-15f) return x;   /* (tanh x = x här; x * x vore ett denormalt tal, långsamt på FM-1) */
     x2 = x * x;
     return x * (135135.f + x2 * (17325.f + x2 * (378.f + x2))) / (135135.f + x2 * (62370.f + x2 * (3150.f + x2 * 28.f)));
 }

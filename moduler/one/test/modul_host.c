@@ -5,6 +5,7 @@
  * och kontroller av båda motorerna, bytet mellan dem, reverbet, pumpen, ERA, MIDI och SAVE (felkod vid fel).
  *   sh kolla.sh bygger och kör den:  build/one-modul build/skarm/s  -> build/skarm/s-NN.ppm, build/skarm/s.wav */
 #include <stdint.h>
+#include <fenv.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,7 +233,7 @@ int main(int argc, char **argv)
     CHECK(M->init(&HOST) == 0, "init");
     M->draw(1);
     shot(base, n++);                            /* 00: start, one (3 OSC) */
-    CHECK(drawn("001") && drawn("3 OSC V2.1"), "start: ljud 001 med trioscillatormotorn, versionen visas");
+    CHECK(drawn("001") && drawn("3 OSC V2.2"), "start: ljud 001 med trioscillatormotorn, versionen visas");
     CHECK(name_shows("one") && !name_shows("ono") && !name_shows("on"), "namnet står i prickdisplayen, prick för prick (ONE)");
 
     M->note(0, 60, 100); M->note(0, 64, 90); M->note(0, 67, 80);
@@ -279,7 +280,7 @@ int main(int argc, char **argv)
     prog(BRIS0 + 5);                            /* Unison Bass */
     M->draw(0);
     shot(base, n++);                            /* 15 */
-    CHECK(drawn("054") && drawn("BRIS V2.1"), "ljud 054 hör till BRIS-motorn");
+    CHECK(drawn("054") && drawn("BRIS V2.2"), "ljud 054 hör till BRIS-motorn");
     CHECK(drawn("VOICE  1/3"), "motorbyte: samma knapp, BRIS-motorns sidor (VOICE 1/3)");
     CHECK(name_shows("Unison Bass"), "elva tecken: mindre prickar, en rad (UNISON BASS)");
     btn(HB_BTN_SEL); enc(HB_ENC_KNOB1, -20); enc(HB_ENC_KNOB2, 30);
@@ -294,7 +295,7 @@ int main(int argc, char **argv)
     enc(HB_ENC_KNOB4, -1);
     btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 22: RUM TONE */
     prog(40);                                        /* ekopluck (3 OSC): sidan ligger kvar, reverbet också */
-    CHECK(drawn("RUM TONE  3/5") && drawn("3 OSC V2.1"), "motorbyte: reverbets sida ligger kvar");
+    CHECK(drawn("RUM TONE  3/5") && drawn("3 OSC V2.2"), "motorbyte: reverbets sida ligger kvar");
     prog(BRIS0 + 5);
     CHECK(drawn("RUM TONE  3/5"), "och tillbaka");
     btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 23: RUM SPACE */
@@ -324,15 +325,15 @@ int main(int argc, char **argv)
 
     /* PRESETS-ratten går runt alla 140, och banken (CC 0) når ljuden över 127 */
     prog(0); enc(HB_ENC_PRESETS, -1);
-    CHECK(drawn("139") && drawn("BRIS V2.1") && name_shows("init"), "PRESETS bakåt från 000: 139, BRIS init");
+    CHECK(drawn("139") && drawn("BRIS V2.2") && name_shows("init"), "PRESETS bakåt från 000: 139, BRIS init");
     enc(HB_ENC_PRESETS, 1);
-    CHECK(drawn("000") && drawn("3 OSC V2.1"), "och framåt: 000 igen");
+    CHECK(drawn("000") && drawn("3 OSC V2.2"), "och framåt: 000 igen");
     M->midi(0xB0, 0, 1); M->midi(0xC0, 10, 0);
     CHECK(drawn("138"), "MIDI: bank 1, program 10 = ljud 138");
     M->midi(0xC0, 12, 0);
     CHECK(drawn("138"), "MIDI: ett nummer över det sista ljudet gör ingenting");
     M->midi(0xB0, 0, 0); M->midi(0xC0, 49, 0);
-    CHECK(drawn("049") && drawn("3 OSC V2.1"), "MIDI: bank 0, program 49 = sista ljudet i trioscillatormotorn");
+    CHECK(drawn("049") && drawn("3 OSC V2.2"), "MIDI: bank 0, program 49 = sista ljudet i trioscillatormotorn");
     M->midi(0xC0, 50, 0);
     {   /* de längsta namnen: två rader */
         int p, two = 0, bad = 0;
@@ -347,7 +348,7 @@ int main(int argc, char **argv)
         CHECK(bad == 0 && two >= 2, "alla 140 namn står rätt i prickdisplayen, de längsta på två rader");
         prog(50);
     }
-    CHECK(drawn("050") && drawn("BRIS V2.1") && name_shows("Poly Magic"), "MIDI: program 50 = BRIS första ljud");
+    CHECK(drawn("050") && drawn("BRIS V2.2") && name_shows("Poly Magic"), "MIDI: program 50 = BRIS första ljud");
 
     for (i = 0; i < 200; i++) enc(HB_ENC_PRESETS, 1);   /* runt och runt */
     for (i = 0; i < 200; i++) enc(HB_ENC_KNOB1 + (i & 3u), (int32_t)(i % 7u) - 3);
@@ -719,7 +720,7 @@ int main(int argc, char **argv)
             M->release();
             CHECK(M->init(&HOST) == 0, "ny start");
             M->draw(1); shot(base, n++);        /* 33, 35: samma ljud, ändrat (*), TAPE 30 */
-            CHECK(drawn(e2 ? "BRIS V2.1" : "3 OSC V2.1") && drawn(e2 ? "056" : "007"), e2 ? "BRIS-ljudet kommer tillbaka med BRIS-motorn" : "3 OSC-ljudet kommer tillbaka med sin motor");
+            CHECK(drawn(e2 ? "BRIS V2.2" : "3 OSC V2.2") && drawn(e2 ? "056" : "007"), e2 ? "BRIS-ljudet kommer tillbaka med BRIS-motorn" : "3 OSC-ljudet kommer tillbaka med sin motor");
             now_ms += 2000; M->draw(0);
             {   /* kom tillbaka: spara igen utan att röra något ger samma bytes */
                 uint8_t was[240]; uint32_t was_n = store_n;
@@ -744,7 +745,7 @@ int main(int argc, char **argv)
         memcpy(store, v1, sizeof v1); store_n = sizeof v1;
         M->release();
         CHECK(M->init(&HOST) == 0, "start med inställningar från ONE 1.0");
-        CHECK(drawn("009") && drawn("VOICE  1/2") && drawn("3 OSC V2.1"), "ONE 1.0: ljudet och sidan kommer tillbaka");
+        CHECK(drawn("009") && drawn("VOICE  1/2") && drawn("3 OSC V2.2"), "ONE 1.0: ljudet och sidan kommer tillbaka");
         btn(HB_BTN_SAVE);
         x = store + 8 + NPMAX * 4 + 4;
         { float e; memcpy(&e, store + 8 + NPMAX * 4, 4);
@@ -764,7 +765,7 @@ int main(int argc, char **argv)
         memcpy(store, v, SET_N);
         M->release();
         CHECK(M->init(&HOST) == 0, "start med inställningar från ONE 2.0");
-        CHECK(drawn("056") && drawn("BRIS V2.1") && drawn("ARP  ON") && leds[HB_BTN_ARP] == 1u, "ONE 2.0: ljudet, motorn, ARP och sidan kommer tillbaka");
+        CHECK(drawn("056") && drawn("BRIS V2.2") && drawn("ARP  ON") && leds[HB_BTN_ARP] == 1u, "ONE 2.0: ljudet, motorn, ARP och sidan kommer tillbaka");
         btn(HB_BTN_SAVE);
         x = store + 8 + NPMAX * 4 + 4;
         CHECK(store[4] == 2 && x[0] == 40 && x[23] == 0 && x[NX] == 1 && x[NX + 1] == 1, "och sparas i det nya formatet, med Pressure av");
@@ -971,6 +972,40 @@ int main(int argc, char **argv)
         #undef SAME
         #undef ENERGY
         #undef NS
+    }
+
+    /* Inga denormala tal i tystnad. FM-1:ans FPU räknar dem mycket långsamt: ett värde som klingat av och fastnat
+     * denormalt (x -= x * k blir till slut x) och räknas varje sampel tog en stor del av ljudavbrottet, också när allt
+     * var tyst (fm1-dock visade 30-70 % utan toner, och TOO SLOW på pads). Här spelas båda motorerna med allt på
+     * (reverb, pump, eko, ensemble, band), sedan tre minuters tystnad: därefter får inget anrop ge underflöde. */
+    {
+        int32_t out[512];
+        int e2, b, k, under = 0, era2, playing = 0;
+        for (era2 = 0; era2 < 2; era2++) for (e2 = 0; e2 < 2; e2++) {
+            M->release(); store_n = 0; M->init(&HOST);
+            prog(e2 ? BRIS0 + 66 : 33);                  /* bla pad i båda motorerna: lång release, eko och ensemble */
+            M->midi(0xB0, 91, 90); M->midi(0xB0, 92, 80);
+            if (era2) M->midi(0xB0, 77, 30);
+            for (k = 0; k < 6; k++) M->note(0, (uint32_t)(48 + 4 * k), 100);
+            for (b = 0; b < 172 * 20; b++) {                 /* 3 s ton, sedan 17 s utklingning: räknas också */
+                if (b == 516) for (k = 0; k < 6; k++) M->note(0, (uint32_t)(48 + 4 * k), 0);
+                feclearexcept(FE_ALL_EXCEPT);
+                memset(out, 0, sizeof out); M->render(out, 256);
+                if (fetestexcept(FE_UNDERFLOW)) playing++;
+            }
+            M->midi(0xB0, 92, 0);
+            if (era2) M->midi(0xB0, 77, 0);              /* (bandet tonar ut och slutar räknas) */
+            for (b = 0; b < 172 * 180; b++) { memset(out, 0, sizeof out); M->render(out, 256); }
+            for (b = 0; b < 344; b++) {
+                feclearexcept(FE_ALL_EXCEPT);
+                memset(out, 0, sizeof out); M->render(out, 256);
+                if (fetestexcept(FE_UNDERFLOW)) under++;
+            }
+        }
+        printf("  denormala tal (två pads, båda motorerna, med och utan band): under spel och utklingning i %d av 13 760 anrop, "
+               "efter 3 min tystnad i %d av 1376\n", playing, under);
+        CHECK(under == 0, "inga denormala tal i tystnad (de är mycket långsamma på FM-1:ans FPU)");
+        CHECK(playing <= 4, "nästan inga denormala tal under spel och utklingning");
     }
 
     snprintf(wpath, sizeof wpath, "%s.wav", base);

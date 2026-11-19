@@ -52,6 +52,7 @@ static inline float sm_tanh(float x)
     float x2;
     if (x > 4.97f) return 1.f;
     if (x < -4.97f) return -1.f;
+    if (x < 1e-15f && x > -1e-15f) return x;   /* (tanh x = x här; x * x vore ett denormalt tal, långsamt på FM-1) */
     x2 = x * x;
     return x * (135135.f + x2 * (17325.f + x2 * (378.f + x2))) / (135135.f + x2 * (62370.f + x2 * (3150.f + x2 * 28.f)));
 }
