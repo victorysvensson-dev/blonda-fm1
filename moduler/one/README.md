@@ -2,7 +2,7 @@
 
 BLONDA ONE är en synth med två ljudmotorer, som modul för [fm1-dock](https://github.com/joakimeriksson/fm1-dock) på
 M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.1 (står överst på skärmen, efter
-motorns namn: `3 OSC V2.1` eller `BRIS V2.1`).
+motorns namn: `3 OSC V2.2` eller `BRIS V2.2`).
 
 Skärmen är BLONDAs: en gul prickdisplay. Ljudets namn står i prickar i ett fönster med svaga prickar bakom, som
 displayen i BLONDAs pluggar och SEQ.3, och rattarnas värden visas som rader av prickar. Färgerna är BLONDAs (gult
@@ -29,6 +29,15 @@ Det märks inte mer än ett vanligt ljudbyte. Den gamla motorns toner tonas ut p
 ekot och reverbet klingar vidare, och böj, modhjul, tryck och pedal följer med till den nya motorn. Skärmen behåller
 sidan om den nya motorn har samma (reverbets sidor, FILTER, EG, LFO), annars knappens första sida. Ensemble, eko
 och utgång är en enda uppsättning för båda motorerna (`src/bfx_fm1.c`).
+
+## Inga denormala tal
+
+Ett värde som klingar av mot noll (ett hölje, ett filter, en utjämning) når till slut de denormala talen, under
+1,2e-38, och fastnar där. FM-1:ans FPU räknar dem mycket långsamt, så fram till 2.1 tog ONE 30–70 % av
+ljudavbrottet också när ingenting spelades, och pads gick över gränsen (TOO SLOW). Emulatorn märker inte det, den
+räknar instruktioner. Sedan 2.2 blir sådana värden exakt noll under 1e-18 (-360 dB, ohörbart), en gång per block
+(`FLUSH` i `src/motor_matte.h`), och `test/modul_host.c` kontrollerar att inga denormala tal uppstår, varken under
+spel eller i tystnad.
 
 ## Varför en egen version av motorerna
 

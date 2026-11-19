@@ -9,6 +9,9 @@
 #define SR ((float)SLITEN_SR)
 #define INV_SR (1.f / (float)SLITEN_SR)
 #define TWOPI 6.2831853f
+/* värden som klingar av mot noll blir exakt noll under 1e-18 (-360 dB) i stället för att fastna bland de denormala
+ * talen, som FM-1:ans FPU räknar mycket långsamt (en enda sådan i varje sampel kostar en stor del av ljudavbrottet) */
+#define FLUSH(x) (((x) < 1e-18f && (x) > -1e-18f) ? 0.f : (x))
 
 /* mediernas tabeller, i GenExpr-ordning (0 kassett ... 8 telefon) */
 static const float T_WOW[9]  = {1.0f, 1.3f, 0.0f, 0.8f, 0.5f, 1.1f, 1.5f, 1.3f, 0.0f};
@@ -206,6 +209,10 @@ static void block(sliten_t *s, float *L, float *R, uint32_t n)
         R[i] = sm_tanh(oR * outk) * (1.f / 0.95f);
         s->lvl = sm_max(sm_abs(L[i]) + sm_abs(R[i]), s->lvl * 0.9995f);
     }
+    /* (en gång per block om 16: det som klingar av mot noll blir noll innan det når de denormala talen) */
+    s->sWet = FLUSH(s->sWet); s->dEnv = FLUSH(s->dEnv); s->jit = FLUSH(s->jit); s->crk = FLUSH(s->crk); s->lvl = FLUSH(s->lvl);
+    s->hpLs = FLUSH(s->hpLs); s->hpRs = FLUSH(s->hpRs); s->lpLs = FLUSH(s->lpLs); s->lpRs = FLUSH(s->lpRs);
+    s->lp2Ls = FLUSH(s->lp2Ls); s->lp2Rs = FLUSH(s->lp2Rs); s->bmLs = FLUSH(s->bmLs); s->bmRs = FLUSH(s->bmRs);
 }
 
 void sliten_process(sliten_t *s, float *L, float *R, uint32_t n)

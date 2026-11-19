@@ -42,7 +42,7 @@
 #ifndef HB_F_MIDI_RT
 #define HB_F_MIDI_RT 16u                        /* nyare fm1-dock: MIDI-klockan kommer i ljudavbrottet (annars huvudloopen) */
 #endif
-#define ONE_VERSION "V2.1"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
+#define ONE_VERSION "V2.2"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
 
 static const hb_host_t *H;
 static char *put_int(char *s, int32_t v);

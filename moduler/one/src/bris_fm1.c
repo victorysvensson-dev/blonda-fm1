@@ -178,6 +178,7 @@ void bris_render_begin(uint32_t n)
         lfo_all[s] = lsm;
         mixL[0][s] = mixR[0][s] = mixL[1][s] = mixR[1][s] = 0.f;
     }
+    lsm = FLUSH(lsm);                           /* (klingar mot noll: inte fastna denormalt, motor_matte.h) */
     part_me[0] = part_me[1] = 0.f;
     part_mask[0] = part_mask[1] = 0;
 }
@@ -200,7 +201,11 @@ static void voices_block(uint32_t first, uint32_t last, const float *lfo, float 
 
         if (t != v->lt) { v->lt = t; v->s1 = 1; v->s2 = 1; v->vel = g; }
         if (v->s2 == 0) {                       /* tyst röst: EG1 klingar ändå av, som i originalet */
-            if (v->s1 == 3) for (s = 0; s < n; s++) v->e1 -= v->e1 * C.fR;
+            if (v->s1 == 3 && v->e1 != 0.f) {   /* (och blir exakt noll i stället för att fastna denormalt) */
+                float x = v->e1;
+                for (s = 0; s < n; s++) x -= x * C.fR;
+                v->e1 = FLUSH(x);
+            }
             continue;
         }
 
@@ -222,7 +227,9 @@ static void voices_block(uint32_t first, uint32_t last, const float *lfo, float 
             }
             e1b[s] = e1; e2b[s] = e2;
         }
-        v->e1 = e1; v->e2 = e2; v->s1 = s1; v->s2 = s2;
+        /* (en gång per block: höljena klingar av mot noll, och ett värde som når de denormala talen fastnar där;
+         *  FLUSH, motor_matte.h. På 16 sampel hinner inget gå från 1e-18 till ett denormalt tal.) */
+        v->e1 = FLUSH(e1); v->e2 = FLUSH(e2); v->s1 = s1; v->s2 = s2;
         if (act == 0) continue;
 
         /* styrsignaler för blocket */

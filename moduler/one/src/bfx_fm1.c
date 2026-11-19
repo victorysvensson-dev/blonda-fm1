@@ -101,10 +101,17 @@ void bfx_block(float *L, float *R, const float *xL, const float *xR, uint32_t n)
             cR = xR[s] * cdry + (tp[2] + tp[3] * 0.6f) * cwet;
 
             /* digitalt eko upp till 0,82 s (originalet 1 s: bufferten BFX_DLN sätter gränsen) */
-            {   /* sdt glider mot målet; Kahan-summa så att float inte fastnar strax före (som double inte gör) */
-                float y = ((F.sdtT - sdt) + sdtk) * sdtc - sdtk, tt = sdt + y;
-                sdtk = (tt - sdt) - y;
-                sdt = tt;
+            {   /* sdt glider mot målet; Kahan-summa så att float inte fastnar strax före (som double inte gör).
+                 * Framme (en biljondels sekund kvar, 0,00000004 sampel) står den exakt på målet: annars blir
+                 * skillnaden gånger sdtc ett denormalt tal i varje sampel för alltid, och de är mycket långsamma på
+                 * FM-1:ans FPU (motor_matte.h, FLUSH). */
+                float rest = (F.sdtT - sdt) + sdtk;
+                if (rest < 1e-12f && rest > -1e-12f) { sdt = F.sdtT; sdtk = 0.f; }
+                else {
+                    float y = rest * sdtc - sdtk, tt = sdt + y;
+                    sdtk = (tt - sdt) - y;
+                    sdt = tt;
+                }
             }
             if (++dw >= BFX_DLN) dw = 0;
             dd = fclamp((sdt - sdtk) * SR, 2.f, (float)(BFX_DLN - 10));
@@ -128,4 +135,7 @@ void bfx_block(float *L, float *R, const float *xL, const float *xR, uint32_t n)
             pk = fmaxf_(fmaxf_(fabsf_(dcyL), fabsf_(dcyR)), pk * 0.9997f);
         }
     }
+    /* (en gång per block: det som klingar av mot noll fastnar annars bland de denormala talen, som är mycket
+     *  långsamma på FM-1:ans FPU; FLUSH, motor_matte.h. På 16 sampel hinner inget gå från 1e-18 dit.) */
+    dlpL = FLUSH(dlpL); dlpR = FLUSH(dlpR); dcyL = FLUSH(dcyL); dcyR = FLUSH(dcyR); pk = FLUSH(pk);
 }
