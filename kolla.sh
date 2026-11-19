@@ -14,5 +14,8 @@ for m in moduler/*/; do
 done
 echo "######## web"
 sh web/bygg.sh
-if python3 -c "import playwright" 2>/dev/null; then python3 web/test_sida.py | tail -3; fi
+if python3 -c "import playwright" 2>/dev/null; then   # (felen visas och stoppar kollen: tail svalde förut svaret)
+    if ! python3 web/test_sida.py > build/test_sida.log 2>&1; then grep "^FEL" build/test_sida.log; tail -1 build/test_sida.log; exit 1; fi
+    tail -1 build/test_sida.log
+fi
 echo "allt grönt"

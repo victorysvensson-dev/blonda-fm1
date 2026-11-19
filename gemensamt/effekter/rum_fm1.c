@@ -59,7 +59,7 @@ void rum_reset(rum_t *r)
     r->pi0 = 0; r->pr = 0; r->started = 0;
     for (i = 0; i < 8; i++) { r->z[i] = 0.f; r->wi[i] = 0; r->ln[i] = 0.f; r->el[i] = 0.f; r->g[i] = 0.f; }
     for (i = 0; i < 4; i++) { r->api[i] = 0; r->ea[i] = 0.f; }
-    r->ep = 0.f; r->dirty = 1; r->gk = 0;
+    r->ep = 0.f; r->dirty = 1; r->gk = 0; r->gsnap = 1;
     for (i = 0; i < RUM_PDN; i++) r->pd[i] = 0;
     for (i = 0; i < RUM_ASUM; i++) r->ap[i] = 0;
     for (i = 0; i < RUM_LSUM; i++) r->dl[i] = 0;
@@ -69,8 +69,12 @@ void rum_init(rum_t *r)
 {
     int i;
     for (i = 0; i < RU_NPARAM; i++) r->p[i] = DEF[i];
+    r->gstep = 0.f;                             /* (mixen hoppar, som pluggen: rum_glide) */
     rum_reset(r);
 }
+
+void rum_glide(rum_t *r, uint32_t n) { r->gstep = n ? 1.f / (float)n : 0.f; }
+float rum_wet_now(const rum_t *r) { return r->gW; }
 
 void rum_set(rum_t *r, int i, float v)
 {
@@ -100,6 +104,7 @@ static void coeffs(rum_t *r)
     if ((float)r->c_pdd < pds) r->c_pdd++;
     r->c_dryG = wet < 0.5f ? 1.f : 2.f - 2.f * wet;
     r->c_wetG = wet < 0.5f ? 2.f * wet : 1.f;
+    if (r->gstep <= 0.f || r->gsnap) { r->gD = r->c_dryG; r->gW = r->c_wetG; r->gsnap = 0; }
     r->c_ok = p[RU_outv] * 1.33f * 0.9f;
     r->dirty = 0;
 }
@@ -226,9 +231,11 @@ static void tail_block(rum_t *r, float *wetL, float *wetR, uint32_t n, uint32_t 
             xb[s] *= 0.35f;
             wl = (z0[s] - z2[s] + z4[s] - z6[s] + z1[s] * 0.5f) * 0.6f;
             wr = (z1[s] - z3[s] + z5[s] - z7[s] + z2[s] * 0.5f) * 0.6f;
-            /* höskärning, två poler (tillståndet räknas alltid, som i originalet) */
-            hrLs += (wl - hrLs) * hrk;
-            hrRs += (wr - hrRs) * hrk;
+            /* höskärning, två poler (tillståndet räknas alltid, som i originalet). 1e-20 (-400 dB) läggs till insignalen:
+             * annars klingar filtren, när linjerna tystnat, inom ett block ner bland de denormala talen, som är mycket
+             * långsamma på FM-1:ans FPU (FLUSH i slutet av blocket hinner inte före med ett snabbt filter) */
+            hrLs += (wl + 1e-20f - hrLs) * hrk;
+            hrRs += (wr + 1e-20f - hrRs) * hrk;
             hr2Ls += (hrLs - hr2Ls) * hrk;
             hr2Rs += (hrRs - hr2Rs) * hrk;
             if (hc) { wl = hr2Ls; wr = hr2Rs; }
@@ -296,7 +303,25 @@ void rum_mix(rum_t *r, float *L, float *R, const float *wetL, const float *wetR,
     float dryG, wetG, ok, pk = r->pk, env = r->env, duck8 = r->p[RU_duck] * 8.f;
     uint32_t s;
     if (r->dirty) coeffs(r);
-    dryG = r->c_dryG; wetG = r->c_wetG; ok = r->c_ok;
+    dryG = r->gD; wetG = r->gW; ok = r->c_ok;
+    if (dryG != r->c_dryG || wetG != r->c_wetG) {   /* (rum_glide) på väg mot en ny mix: sampel för sampel */
+        float st = r->gstep, td = r->c_dryG, tw = r->c_wetG;
+        for (s = 0; s < n; s++) {
+            float l = L[s], rr = R[s], a = wetL[s], b = wetR[s], m, ia = sm_abs(l) + sm_abs(rr);
+            dryG = dryG < td - st ? dryG + st : dryG > td + st ? dryG - st : td;
+            wetG = wetG < tw - st ? wetG + st : wetG > tw + st ? wetG - st : tw;
+            env = ia > env ? env + (ia - env) * 0.01f : env * 0.99985f;
+            if (duck8 > 0.f) { float dkk = 1.f / (1.f + env * duck8); a *= dkk; b *= dkk; }
+            L[s] = sm_tanh((l * dryG + a * wetG) * ok) * (1.f / 0.9f);
+            R[s] = sm_tanh((rr * dryG + b * wetG) * ok) * (1.f / 0.9f);
+            m = sm_abs(a) + sm_abs(b);
+            pk *= 0.9997f;
+            if (m > pk) pk = m;
+        }
+        r->gD = dryG; r->gW = wetG;
+        r->pk = FLUSH(pk); r->env = FLUSH(env);
+        return;
+    }
     for (s = 0; s < n; s++) {
         float l = L[s], rr = R[s], a = wetL[s], b = wetR[s], m, ia = sm_abs(l) + sm_abs(rr);
         /* ducking: klangen viker undan för insignalen */

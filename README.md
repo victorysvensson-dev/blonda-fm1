@@ -5,7 +5,7 @@ fm1-dock installeras en gång på FM-1, och modulerna ligger sedan sida vid sida
 
 | Modul | Vad | Ljudet kommer från |
 |---|---|---|
-| [`moduler/one`](moduler/one) | BLONDA ONE – en synth med två ljudmotorer och 140 ljud; motorn byts med ljudet. 3 OSC (BRIS möter Moog: tre oscillatorer per röst, brus, drivning, en stege som självsvänger) och BRIS (sexstämmig analog poly efter GS Music Bree6). ARP och stegsekvenser (SEQ) före motorerna; efter dem reverbet RUM, PUMP (ducking i takt) och ERA (band och lofi) | `blonda-motor` (ONE, BRIS, RUM, SLITEN), testad mot den |
+| [`moduler/one`](moduler/one) | BLONDA ONE – en synth med två ljudmotorer och 160 ljud, med egna effekter per ljud; motorn byts med ljudet. 3 OSC (BRIS möter Moog: tre oscillatorer per röst, brus, drivning, en stege som självsvänger) och BRIS (sexstämmig analog poly efter GS Music Bree6). ARP och stegsekvenser (SEQ) före motorerna; efter dem reverbet RUM, PUMP (ducking i takt) och ERA (band och lofi) | `blonda-motor` (ONE, BRIS, RUM, SLITEN), testad mot den |
 | [`moduler/puls`](moduler/puls) | BLONDA PULS – trummaskin: åtta syntade trumljud, 16-stegssekvenser, sex mönster, 10 trumset | `blonda-motor` (PULS), testad mot den |
 
 Varje modul kan också provas i webbläsaren: `web/` kör exakt samma modulkod, kompilerad till WebAssembly, med en
