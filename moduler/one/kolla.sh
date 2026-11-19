@@ -14,6 +14,7 @@ mkdir -p ../../build
 export FM1_DOCK
 mkdir -p build/skarm
 
+python3 tools/gen_dotfont.py
 python3 tools/gen_presets_one.py "$BLONDA_MOTOR"
 python3 tools/gen_presets_bris.py "$BLONDA_MOTOR"
 if git rev-parse --git-dir >/dev/null 2>&1 && ! git diff --quiet -- src/one_presets.h src/bris_presets.h; then

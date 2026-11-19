@@ -37,11 +37,12 @@
 #include "rum_fm1.h"
 #include "pump_fm1.h"
 #include "spel_fm1.h"
+#include "blonda_dot.h"
 
 #ifndef HB_F_MIDI_RT
 #define HB_F_MIDI_RT 16u                        /* nyare fm1-dock: MIDI-klockan kommer i ljudavbrottet (annars huvudloopen) */
 #endif
-#define ONE_VERSION "V2.0"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
+#define ONE_VERSION "V2.1"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
 
 static const hb_host_t *H;
 static char *put_int(char *s, int32_t v);
@@ -53,7 +54,8 @@ static float clampf(float x, float lo, float hi);
 #define XBASE 64
 enum { XP_rmix = XBASE, XP_rsize, XP_rdecay, XP_rtype, XP_rlowc, XP_rhighc, XP_rdamp, XP_rmodd,
        XP_rpredel, XP_rwidth, XP_rduck, XP_rout, XP_pdepth, XP_prate, XP_ptarget, XP_bpm,
-       XP_amode, XP_arate, XP_aoct, XP_agate, XP_srate, XP_sgate, XP_skeys, XP_END };
+       XP_amode, XP_arate, XP_aoct, XP_agate, XP_srate, XP_sgate, XP_skeys, XP_touch, XP_END };
+#define PNONE 255                               /* en tom rad på en sida */
 #define XN (XP_END - XBASE)
 typedef struct { const char *name; float lo, hi, def; uint8_t integer; int8_t rum; } xparam_t;
 static const xparam_t XPAR[XN] = {
@@ -69,6 +71,7 @@ static const xparam_t XPAR[XN] = {
     {"Arp Octaves", 1.f, 4.f, 1.f, 1, -1}, {"Arp Gate", 0.05f, 1.f, 0.5f, 0, -1},
     {"Seq Rate", 0.f, (float)(SPEL_NRATES - 1), 3.f, 1, -1}, {"Seq Gate", 0.05f, 1.f, 0.5f, 0, -1},
     {"Seq Keys", 0.f, 1.f, 0.f, 1, -1},
+    {"Pressure", 0.f, 1.f, 0.f, 0, -1},
 };
 static float xv[XN];
 static rum_t rum;
@@ -78,6 +81,10 @@ static volatile uint32_t rum_gen;               /* räknas upp när reverbet nol
 
 /* ------------------------------------------------------------------ sidor: en uppsättning per motor */
 typedef struct { const char *title; uint8_t btn; uint8_t p[4]; } page_t;
+/* TOUCH (GLO, efter motorns egna sidor): hur mycket tangenternas tryck verkar. FM-1:ans tangenter känner trycket,
+ * och motorerna tar det som modhjulet (vibrato och filter, efter ljudets MW-rattar). Från början 0: trycket når
+ * fullt utslag redan vid ett vanligt anslag, och då svajar tonhöjden i många ljud utan att man bett om det. */
+#define T_PAGE {"TOUCH", HB_BTN_GLO, {XP_touch, PNONE, PNONE, PNONE}}
 /* ARP och SEQ: sist i båda motorerna, på sina egna knappar */
 #define S_PAGES \
     {"ARP", HB_BTN_ARP, {XP_amode, XP_arate, XP_aoct, XP_agate}}, \
@@ -102,6 +109,7 @@ static const page_t PAGES_ONE[] = {
     {"FX", HB_BTN_FX, {OP_chorus, OP_dtime, OP_dfb, OP_dmix}},
     X_PAGES,
     {"VOICE", HB_BTN_GLO, {OP_lage, OP_porta, OP_uniint, OP_vol}},
+    T_PAGE,
     S_PAGES,
 };
 static const page_t PAGES_BRIS[] = {
@@ -115,6 +123,7 @@ static const page_t PAGES_BRIS[] = {
     X_PAGES,
     {"VOICE", HB_BTN_GLO, {BP_lage, BP_porta, BP_uniint, BP_vol}},
     {"PLAY", HB_BTN_GLO, {BP_velf, BP_vela, BP_bendr, BP_kbda}},
+    T_PAGE,
     S_PAGES,
 };
 
@@ -177,16 +186,17 @@ static const char *preset_name(int i)
 
 /* ------------------------------------------------------------------ tillstånd */
 #define SET_MAGIC 0x32454E4Fu                   /* "ONE2" */
-#define SET_VERSION 1
+#define SET_VERSION 2                           /* 1 (ONE 2.0): utan Pressure, x[23] och sedan engine, arp_on */
 typedef struct {
     uint32_t magic;
     uint8_t version, preset, page, edited;      /* preset: ljudets nummer i sin motor (inte i hela listan, som kan växa) */
     float p[PMAX];                              /* ljudets parametrar i sin motors ordning */
     float era;
-    uint8_t x[XN];                              /* reverb, pump, ARP och SEQ: 0..100 (heltal och tempo som de är) */
-    uint8_t engine, arp_on, pad[3];             /* ljudets motor (ENG_ONE, ENG_BRIS); ARP på */
+    uint8_t x[XN];                              /* reverb, pump, ARP, SEQ och tryck: 0..100 (heltal och tempo som de är) */
+    uint8_t engine, arp_on, pad[2];             /* ljudets motor (ENG_ONE, ENG_BRIS); ARP på */
 } settings_t;                                   /* 232 byte (fm1-dock tar upp till 240) */
 typedef char settings_fits[sizeof(settings_t) <= 240 ? 1 : -1];
+typedef char settings_v1_same_size[sizeof(settings_t) == 232 ? 1 : -1];   /* (version 1 laddas i samma post) */
 /* ONE 1.0 (bara trioscillatormotorn, utan reverb och pump): laddas, så att ett sparat ljud följer med */
 #define SET1_MAGIC 0x31454E4Fu                  /* "ONE1" */
 typedef struct {
@@ -200,20 +210,35 @@ static int preset = 1, page, edited;
 static volatile uint32_t saved_ms;              /* när SAVE trycktes (meddelandet visas en stund) */
 static uint32_t at_max;                          /* största tangenttrycket just nu */
 static float last_bend, last_mw, last_at;       /* böj, hjul och tryck just nu: följer med när motorn byts */
+static volatile float at_target;                /* trycket gånger Pressure: dit motorns aftertouch ska */
+static float at_now;                            /* där den är (utjämnad i ljudet, så att trycket inte kommer som ett hack) */
 static int last_sus, bank;                      /* sustainpedalen; MIDI-banken (CC 0) för ljud över 127 */
 
 /* vad som syns, för att bara rita om det som ändrats */
 static struct { int preset, page, edited, saved, era, eng, row[4]; uint32_t voices, spel; int32_t val[4]; } shown;
 static uint32_t seq_saved;                      /* spel_seq_changed när sekvensen senast sparades eller laddades */
 
-/* skärmens färger: varmt elfenben, orange och petrol på svart, som gamla instrumentpaneler */
-static const uint16_t C_NAME = HB_RGB(236, 230, 214),    /* ljudets namn */
-                      C_VAL = HB_RGB(242, 106, 44),      /* värden, staplar, rösterna */
-                      C_LBL = HB_RGB(158, 150, 132),     /* parametrarnas namn */
-                      C_HEAD = HB_RGB(52, 150, 144),     /* nummer, bank, sidan */
-                      C_TRACK = HB_RGB(56, 40, 30),      /* staplarnas spår */
-                      C_RULE = HB_RGB(78, 70, 58),       /* linjen */
+/* Skärmen i BLONDA-stil: gul prickdisplay. Ljudets namn står i prickar (5 x 7 per tecken, src/blonda_dot.h) i ett
+ * fönster med svaga prickar bakom, som displayen i BLONDAs pluggar och SEQ.3; rattarnas värden visas som prickrader.
+ * Färgerna är BLONDAs: gult E9C54A, nästan svart 17181A, petrol 227E7A, kräm E8E6DC. Text ritas av fm1-dock, som
+ * alltid lägger svart bakom den: därför svart botten utanför namnfönstret. */
+static const uint16_t C_YEL = HB_RGB(0xE9, 0xC5, 0x4A),  /* tända prickar, värden, rösterna */
+                      C_DIM = HB_RGB(0x40, 0x39, 0x1E),  /* släckta prickar: samma gula, svagt */
+                      C_PANEL = HB_RGB(0x17, 0x18, 0x1A),    /* namnfönstrets botten */
+                      C_GRID = HB_RGB(0x2C, 0x29, 0x1B), /* fönstrets svaga prickar */
+                      C_LBL = HB_RGB(0xC4, 0xC2, 0xB8),  /* parametrarnas namn (kräm, lite dämpad) */
+                      C_HEAD = HB_RGB(0x34, 0xA8, 0xA2), /* nummer, motor, sidan (petrol, ljusare för att läsas) */
+                      C_RULE = HB_RGB(0x22, 0x7E, 0x7A), /* den prickade linjen */
                       C_BLACK = 0;
+#define C_VAL C_YEL
+/* platserna på skärmen (under fm1-dock:s rad, HB_TOP = 24) */
+#define Y_HEAD 26                               /* nummer, motor och version, ERA */
+#define Y_NAME 46                               /* namnfönstret, DOT_H = 48 högt */
+#define Y_PAGE 98                               /* sidans namn, rösterna */
+#define Y_RULE 117
+#define Y_ROW 122                               /* fyra rader om ROW_H */
+#define ROW_H 30
+#define NDOT 28                                 /* prickar i en rad: 28 x 8 = 224 bildpunkter */
 
 /* ------------------------------------------------------------------ ERA: band och lofi efter motorerna */
 static sliten_t tape;
@@ -352,6 +377,7 @@ static void set_x(int p, float v)
     else if (p == XP_srate) spel_set.srate = (int32_t)v;
     else if (p == XP_sgate) spel_set.sgate = v;
     else if (p == XP_skeys) spel_set.skeys = (int32_t)v;
+    else if (p == XP_touch) at_target = last_at * v;
 }
 
 static void set_param(int p, float v)
@@ -388,7 +414,7 @@ static void load_preset(int i)
         uint8_t btn = old->pages[page < old->npages ? page : 0].btn;
         for (k = 0; k < old->npages && k < page; k++) if (old->pages[k].btn == btn) at++;   /* vilken av knappens sidor */
         old->all_notes_off();
-        nw->bend(last_bend); nw->modwheel(last_mw); nw->aftertouch(last_at);
+        nw->bend(last_bend); nw->modwheel(last_mw);     /* (trycket sätter ljudavbrottet, varje anrop) */
         nw->sustain(spel_set.arp_on ? 0 : last_sus);    /* (med ARP på håller pedalen arpeggiot, inte motorns toner) */
         page = 0;
         for (k = 0; k < nw->npages; k++) if (nw->pages[k].btn == btn) { page = k; break; }
@@ -476,6 +502,11 @@ static void render(int32_t *out, uint32_t n)
         case Q_CMD: spel_cmd((int)b); break;
         default: spel_panic(); break;
         }
+    }
+    {   /* tangenternas tryck, mjukt: en tredjedel av vägen per anrop (framme på ett par hundradelar) */
+        float d = at_target - at_now;
+        at_now = d > 0.002f || d < -0.002f ? at_now + d * 0.3f : at_target;
+        E->aftertouch(at_now);
     }
     spel_run(0, r_bpm, r_ext);                  /* det som ska börja nu (första tonen i ett arpeggio, PLAY) */
     while (n) {
@@ -582,11 +613,11 @@ static void midi(uint32_t st, uint32_t d1, uint32_t d2)
     case 0x80: note(st & 15u, d1, 0); break;
     case 0xB0: cc(st & 15u, d1, d2); break;
     case 0xC0: { int i = (int)d1 + bank * 128; if (i < NPRESETS) load_preset(i); break; }
-    case 0xD0: last_at = (float)d1 / 127.f; E->aftertouch(last_at); break;
+    case 0xD0: last_at = (float)d1 / 127.f; at_target = last_at * xv[XP_touch - XBASE]; break;
     case 0xA0:                                  /* tryck per tangent (FM-1:ans tangenter): det största gäller */
         at_max = d2 > at_max ? d2 : (d2 == 0u ? 0u : at_max);
         last_at = (float)at_max / 127.f;
-        E->aftertouch(last_at);
+        at_target = last_at * xv[XP_touch - XBASE];
         break;
     case 0xE0: last_bend = (float)((int32_t)((d2 << 7) | d1) - 8192) / 8192.f; E->bend(last_bend); break;
     default: break;
@@ -596,7 +627,9 @@ static void midi(uint32_t st, uint32_t d1, uint32_t d2)
 /* ------------------------------------------------------------------ panelen */
 static void turn(int p, int32_t clicks)
 {
-    float step = par_integer(p) ? 1.f : (par_hi(p) - par_lo(p)) * 0.01f;
+    float step;
+    if (p == PNONE) return;
+    step = par_integer(p) ? 1.f : (par_hi(p) - par_lo(p)) * 0.01f;
     set_param(p, par_get(p) + step * (float)clicks);
 }
 
@@ -615,7 +648,7 @@ static void ui(uint32_t ev, int32_t arg)
         settings_t s;
         int i;
         s.magic = SET_MAGIC; s.version = SET_VERSION; s.preset = (uint8_t)preset_index(preset); s.page = (uint8_t)page; s.edited = (uint8_t)edited;
-        s.engine = (uint8_t)eng; s.arp_on = (uint8_t)spel_set.arp_on; s.pad[0] = s.pad[1] = s.pad[2] = 0;
+        s.engine = (uint8_t)eng; s.arp_on = (uint8_t)spel_set.arp_on; s.pad[0] = s.pad[1] = 0;
         for (i = 0; i < PMAX; i++) s.p[i] = i < E->np ? E->get(i) : 0.f;
         s.era = (float)era;
         for (i = 0; i < XN; i++) s.x[i] = (uint8_t)(XPAR[i].integer ? xv[i] + 0.5f : xv[i] * 100.f + 0.5f);
@@ -654,22 +687,59 @@ static void ui(uint32_t ev, int32_t arg)
     }
 }
 
+/* en rund prick (d x d, hörnen bortskurna) på duken */
+static void cv_dot(int32_t x, int32_t y, int32_t d, uint16_t c)
+{
+    H->cv_rect(x + 1, y, d - 2, d, c);
+    H->cv_rect(x, y + 1, d, d - 2, c);
+}
+
+/* ljudets namn i prickar: ett fönster med svaga prickar, namnet tänt i gult. Långa namn får mindre prickar, och
+ * de längsta två rader (dot_layout). */
+static void draw_name(const char *s)
+{
+    int len1, start2, pitch = dot_layout(s, &len1, &start2), lines = start2 ? 2 : 1, d = pitch - 1;
+    int cols = DOT_W / pitch, rows = DOT_H / pitch, x0 = 2, y0 = (DOT_H - (rows * pitch - 1)) / 2;
+    int line, i, gr, gc, x, y;
+    H->cv_begin(DOT_W, DOT_H, C_PANEL);
+    for (gr = 0; gr < rows; gr++)
+        for (gc = 0; gc < cols - 1; gc++) H->cv_rect(x0 + gc * pitch, y0 + gr * pitch, d, d, C_GRID);
+    for (line = 0; line < lines; line++) {
+        const char *t = line ? s + start2 : s;
+        for (i = 0; t[i] && (line || i < len1); i++) {
+            const uint8_t *g = dot_glyph(t[i]);
+            if (!g) continue;
+            for (gr = 0; gr < 7; gr++)
+                for (gc = 0; gc < 5; gc++)
+                    if (g[gr] >> (4 - gc) & 1) { dot_at(pitch, lines, line, i, gc, gr, &x, &y); H->cv_rect(x, y, d, d, C_YEL); }
+        }
+    }
+    H->cv_blit(4, Y_NAME);
+}
+
+/* en rad: namnet, värdet till höger i gult, och värdet som en rad prickar */
+static void draw_meter(int32_t y, int32_t lit)
+{
+    int i;
+    H->cv_begin(NDOT * 8, 6, C_BLACK);
+    for (i = 0; i < NDOT; i++) cv_dot(i * 8 + 1, 0, 6, i < lit ? C_YEL : C_DIM);
+    H->cv_blit(8, y);
+}
 static void draw_row(int r)
 {
     int p = PAGES[page].p[r];
-    int32_t y = 110 + r * 32, bar, w;
+    int32_t y = Y_ROW + r * ROW_H, bar, lit, tw;
     char s[24];
+    if (p == PNONE) { H->fill(8, y, 224, 26, C_BLACK); return; }
     bar = value_text(p, s);
-
-    int32_t tw = H->text_w(0, s);
+    tw = H->text_w(0, s);
     tw = tw > 90 ? 90 : tw;
     H->text(8, y, 142, 0, par_name(p), C_LBL, 0);
     H->fill(150, y, 82, 16, C_BLACK);           /* värdet högerställt */
     H->text(232 - tw, y, tw, 0, s, C_VAL, 0);
-    w = bar * 224 / 1000;
-    w = w < 0 ? 0 : w > 224 ? 224 : w;
-    if (w) H->fill(8, y + 20, w, 5, C_VAL);
-    if (w < 224) H->fill(8 + w, y + 20, 224 - w, 5, C_TRACK);
+    lit = (bar * NDOT + 500) / 1000;            /* (minst en prick så fort värdet är över noll) */
+    if (lit < 1 && bar > 0) lit = 1;
+    draw_meter(y + 19, lit < 0 ? 0 : lit > NDOT ? NDOT : lit);
 }
 
 /* under inspelning visar SEQ-sidan vad knapparna gör i stället för rattarnas värden */
@@ -677,11 +747,11 @@ static void draw_hint(int r)
 {
     static const char *const K[4] = {"KEYS", "PLAY", "SEQ", "REC"};
     static const char *const D[4] = {"ADD STEP", "REST", "TIE", "DONE"};
-    int32_t y = 110 + r * 32, tw = H->text_w(0, D[r]);
+    int32_t y = Y_ROW + r * ROW_H, tw = H->text_w(0, D[r]);
     H->text(8, y, 142, 0, K[r], C_LBL, 0);
     H->fill(150, y, 82, 16, C_BLACK);
     H->text(232 - tw, y, tw, 0, D[r], C_VAL, 0);
-    H->fill(8, y + 20, 224, 5, C_BLACK);
+    H->fill(8, y + 19, 224, 6, C_BLACK);
 }
 
 static void draw(uint32_t full)
@@ -699,29 +769,26 @@ static void draw(uint32_t full)
         shown.voices = ~0u;
         shown.spel = ~sp;
     }
+    if (eng != shown.eng) {                     /* en annan motor: andra sidor och parametrar, också med samma nummer */
+        shown.page = -1;
+        shown.eng = eng;
+    }
     on_arp = PAGES[page].btn == HB_BTN_ARP; on_seq = PAGES[page].btn == HB_BTN_SEQ; hint = on_seq && rec;
     if (sp != shown.spel) {
         if ((sp ^ shown.spel) & 0xFFFFu) leds();
         retitle = on_arp || on_seq;
         shown.spel = sp;
     }
-    if (eng != shown.eng) {                     /* en annan motor: andra sidor och parametrar, också med samma nummer */
-        shown.page = -1;
-        shown.eng = eng;
-    }
     if (preset != shown.preset || edited != shown.edited) {
         char s[40], *e;
-        const char *name = preset_name(preset);
         s[0] = (char)('0' + preset / 100); s[1] = (char)('0' + preset / 10 % 10); s[2] = (char)('0' + preset % 10); s[3] = 0;
-        H->text(8, 28, 40, 0, s, C_HEAD, 0);    /* ljudets nummer, sedan motorn och versionen */
-        H->fill(48, 28, 112, 16, C_BLACK);
+        H->text(8, Y_HEAD, 40, 0, s, C_HEAD, 0);    /* ljudets nummer, sedan motorn och versionen */
+        H->fill(48, Y_HEAD, 112, 16, C_BLACK);
         put_str(put_str(put_str(s, E->tag), " "), ONE_VERSION);
-        H->text(48, 28, 112, 0, s, C_HEAD, 0);
-        e = put_str(s, name);
+        H->text(48, Y_HEAD, 112, 0, s, C_HEAD, 0);
+        e = put_str(s, preset_name(preset));
         if (edited) put_str(e, "*");
-        H->fill(8, 44, 224, 32, C_BLACK);
-        if (H->text_w(1, s) <= 224) H->text(8, 44, 224, 1, s, C_NAME, 0);
-        else H->text(8, 52, 224, 0, s, C_NAME, 0);
+        draw_name(s);
         shown.preset = preset; shown.edited = edited;
     }
     if (page != shown.page || saving != shown.saved || retitle) {
@@ -739,21 +806,25 @@ static void draw(uint32_t full)
         }
         else if (n > 1) { char *e = put_str(s, PAGES[page].title); e = put_str(e, "  "); e = put_int(e, k); e = put_str(e, "/"); put_int(e, n); }
         else put_str(s, PAGES[page].title);
-        H->text(8, 82, 150, 0, s, saving ? C_VAL : C_HEAD, 0);
-        H->fill(8, 102, 224, 1, C_RULE);
-        if (page != shown.page) for (r = 0; r < 4; r++) shown.row[r] = -1;
+        H->text(8, Y_PAGE, 150, 0, s, saving ? C_VAL : C_HEAD, 0);
+        if (page != shown.page) {
+            for (i = 0; i < 56; i++) H->fill(8 + i * 4, Y_RULE, 2, 2, C_RULE);   /* den prickade linjen */
+            for (r = 0; r < 4; r++) shown.row[r] = -1;
+        }
         shown.page = page; shown.saved = saving;
     }
     for (r = 0; r < 4; r++) {
         int p = hint ? 1000 + r : PAGES[page].p[r];
-        int32_t v = hint ? 0 : p == XP_bpm ? tempo_shown() + (pump.ext ? 1000 : 0) : (int32_t)(par_get(p) * 1000.f);
+        int32_t v = hint || p == PNONE ? 0 : p == XP_bpm ? tempo_shown() + (pump.ext ? 1000 : 0) : (int32_t)(par_get(p) * 1000.f);
         if (shown.row[r] != p || shown.val[r] != v) {
             if (hint) draw_hint(r); else draw_row(r);
             shown.row[r] = p; shown.val[r] = v;
         }
     }
     if (vm != shown.voices) {                   /* sex prickar: rösterna som låter */
-        for (r = 0; r < 6; r++) H->fill(170 + r * 11, 86, 8, 8, vm >> r & 1u ? C_VAL : C_TRACK);
+        H->cv_begin(66, 8, C_BLACK);
+        for (r = 0; r < 6; r++) cv_dot(r * 11, 0, 8, vm >> r & 1u ? C_YEL : C_DIM);
+        H->cv_blit(166, Y_PAGE + 4);
         shown.voices = vm;
     }
     if (era != shown.era) {                     /* ERA uppe till höger: MODERN, TAPE nn, LOFI nn */
@@ -761,13 +832,22 @@ static void draw(uint32_t full)
         int32_t tw;
         era_text(s);
         tw = H->text_w(0, s);
-        H->fill(160, 28, 72, 16, C_BLACK);
-        H->text(232 - tw, 28, tw, 0, s, era > 0 ? C_VAL : C_LBL, 0);
+        H->fill(160, Y_HEAD, 72, 16, C_BLACK);
+        H->text(232 - tw, Y_HEAD, tw, 0, s, era > 0 ? C_VAL : C_LBL, 0);
         shown.era = era;
     }
 }
 
 /* ------------------------------------------------------------------ in och ur */
+/* sidan TOUCH:s nummer i motorn e (sparat av ONE 2.0, som inte hade den: sidorna efter flyttas ett steg) */
+static int eng_pages_before_touch(int e)
+{
+    const engine_t *g = &ENGINES[e == ENG_BRIS ? ENG_BRIS : ENG_ONE];
+    int i;
+    for (i = 0; i < g->npages; i++) if (g->pages[i].p[0] == XP_touch) return i;
+    return g->npages;
+}
+
 static int init(const hb_host_t *h)
 {
     settings_t s;
@@ -780,6 +860,7 @@ static int init(const hb_host_t *h)
     one_init();
     eng = ENG_ONE; E = AE = &ENGINES[ENG_ONE];
     last_bend = last_mw = last_at = 0.f; last_sus = 0; bank = 0; at_max = 0;
+    at_target = 0.f; at_now = 0.f;
     sliten_init(&tape);
     era = 0; tape_on = 0;
     era_apply();
@@ -793,7 +874,14 @@ static int init(const hb_host_t *h)
     seq_saved = spel_seq_changed;
     q_w = q_r = q_lost = 0; clk_start = clk_stop = 0;
     for (i = 0; i < XN; i++) set_x(XBASE + i, XPAR[i].def);
-    if (H->load(&s, sizeof s) == 0 && s.magic == SET_MAGIC && s.version == SET_VERSION && preset_number(s.engine, s.preset) >= 0) {
+    i = H->load(&s, sizeof s) == 0 && s.magic == SET_MAGIC;
+    if (i && s.version == 1) {                  /* ONE 2.0: en parameter färre (Pressure), så motorn och ARP låg en byte tidigare */
+        s.arp_on = s.engine; s.engine = s.x[XN - 1];
+        s.x[XN - 1] = 0;                        /* Pressure: av */
+        if (s.page >= (eng_pages_before_touch(s.engine))) s.page++;   /* sidan TOUCH är ny, före ARP och SEQ */
+        s.version = SET_VERSION;
+    }
+    if (i && s.version == SET_VERSION && preset_number(s.engine, s.preset) >= 0) {
         load_preset(preset_number(s.engine, s.preset));   /* motorn och det som inte sparas; sedan värdena som de sparades */
         page = s.page < NPAGES ? s.page : 0;
         for (i = 0; i < E->np; i++) E->set(i, s.p[i]);

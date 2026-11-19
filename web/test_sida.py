@@ -268,7 +268,7 @@ with sync_playwright() as p:
     check(sida() == e1, "BRIS-motorn: EDIT har en enda sida (OSC)")
     pg.click("text=GLO"); pg.wait_for_timeout(250); g1 = sida()
     pg.click("text=GLO"); pg.wait_for_timeout(250)
-    check(g1 != e1 and sida() != g1, "BRIS-motorn: GLO har två sidor (VOICE, PLAY)")
+    check(g1 != e1 and sida() != g1, "BRIS-motorn: GLO har flera sidor (VOICE, PLAY, TOUCH)")
     pg.screenshot(path=os.path.join(OUT, "webb-8-one-bris.png"))
     pg.click("text=SAVE"); pg.wait_for_timeout(400)
     check(pg.evaluate("() => !!localStorage.getItem('blonda-fm1-one')"), "SAVE sparar ONE i webbläsaren")
