@@ -1,8 +1,12 @@
 # BLONDA ONE för M-VAVE FM-1
 
 BLONDA ONE är en synth med två ljudmotorer, som modul för [fm1-dock](https://github.com/joakimeriksson/fm1-dock) på
-M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.0 (står överst på skärmen, efter
-motorns namn: `3 OSC V2.0` eller `BRIS V2.0`).
+M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.1 (står överst på skärmen, efter
+motorns namn: `3 OSC V2.1` eller `BRIS V2.1`).
+
+Skärmen är BLONDAs: en gul prickdisplay. Ljudets namn står i prickar i ett fönster med svaga prickar bakom, som
+displayen i BLONDAs pluggar och SEQ.3, och rattarnas värden visas som rader av prickar. Färgerna är BLONDAs (gult
+E9C54A, petrol 227E7A, kräm E8E6DC, nästan svart 17181A). Tecknen ritas i `tools/gen_dotfont.py`.
 
 | motor | ljud | vad den är |
 |---|---|---|
@@ -17,7 +21,7 @@ Ljuden i ordning: 000 init (3 OSC) · 001 one (signaturljudet) · 13 basar · 9 
 och pluck · 6 effektljud · 050–138 BRIS 89 ljud (Poly Magic först) · 139 init (BRIS).
 
 Fram till version 1.0 var det två moduler (BRIS 3.0 och ONE 1.0). Nu är allt en modul: ett ljud som sparats i
-ONE 1.0 följer med, BRIS-modulen kan tas bort från FM-1:an.
+ONE 1.0 eller 2.0 följer med, BRIS-modulen kan tas bort från FM-1:an.
 
 ## Byta mellan motorerna
 
@@ -83,7 +87,7 @@ Webbemulatorn i `web/` kör samma modul i webbläsaren.
 | EDIT | 3 OSC: OSC 1 · OSC 2 · OSC 3 (vågform, fotläge, finstämning, nivå; pulsbredd på OSC 1) · MIX (halvtoner för 2 och 3, brus, detune). BRIS: OSC |
 | ENV · LFO | EG2 AMP / EG1 FILTER · LFO / LFO MOD |
 | FX | FX (ensemble, eko) · RUM · RUM TONE · RUM SPACE · PUMP (tryck igen: nästa sida) |
-| GLO | VOICE (röstläge, portamento, unisonintervall, volym); BRIS också PLAY (anslag, böjomfång, tangentföljning) |
+| GLO | VOICE (röstläge, portamento, unisonintervall, volym); BRIS också PLAY (anslag, böjomfång, tangentföljning); TOUCH (PRESSURE: hur mycket tangenternas tryck verkar, se nedan) |
 | ARP | arpeggiot: första trycket visar ARP-sidan och slår på det, nästa slår av |
 | REC | spelar in en sekvens steg för steg (se nedan); REC igen: klar |
 | PLAY | spelar sekvensen runt; under inspelning: ett tyst steg |
@@ -92,6 +96,14 @@ Webbemulatorn i `web/` kör samma modul i webbläsaren.
 | HOME (håll) | fm1-dock:s väljare: byt till en annan modul |
 
 Med KNOBS CC påslaget i fm1-dock kommer rattarna som CC 74, 71, 73, 72: cutoff, resonans, EG2 attack, release.
+
+## Tangenternas tryck (TOUCH)
+
+FM-1:ans tangenter känner hur hårt de trycks, i fm1-dock: anslaget (velocity) och trycket medan tangenten hålls
+(aftertouch). Motorerna tar trycket som modhjulet: vibrato och filter, så mycket som ljudets MW-rattar säger (LFO MOD:
+MW OSC, MW CUTOFF). Trycket når fullt utslag redan vid ett vanligt anslag, och då svajar tonhöjden i många ljud utan
+att man bett om det. Därför finns **PRESSURE** på sidan TOUCH (GLO): 0 från början (trycket gör ingenting), uppåt för
+att släppa fram det. Trycket kommer mjukt, inte som ett språng. Anslagets styrka verkar som förut (VEL-rattarna).
 
 ## ARP och SEQ
 
@@ -177,6 +189,7 @@ src/bris_fm1.c, .h          BRIS-motorn
 src/bfx_fm1.c, .h           ensemble, eko och utgång, gemensamma för motorerna
 src/spel_fm1.c, .h          ARP och SEQ: mellan tangenterna och motorn
 src/motor_matte.h           snabb matte utan libm, gemensam
+src/blonda_dot.h            prickdisplayens tecken – GENERERAD ur teckningarna i tools/gen_dotfont.py
 src/one_presets.h           parametrar och fabriksljud – GENERERADE ur blonda-motor (tools/gen_presets_one.py)
 src/bris_presets.h          likadant för BRIS (tools/gen_presets_bris.py)
 test/, test/bris/           likhet och scenarier per motor; ARP och SEQ (spel_test.c); låtsas-FM-1 (modul_host.c);
@@ -192,7 +205,8 @@ flyttas BRIS-ljudens nummer om 3 OSC får fler (program change och sparat ljud p
 
 ## Bygga och installera
 
-GitHub bygger `one.dock` vid varje push (`.github/workflows/bygg.yml` i repots rot). För hand: JieLis kompilator
+GitHub bygger `one.dock` vid varje push (`.github/workflows/bygg.yml` i repots rot); den senaste från main ligger
+på <https://victorysvensson-dev.github.io/blonda-fm1/one.dock>. För hand: JieLis kompilator
 (`fm1-dock/tools/get_toolchain.sh`), sedan `python3 tools/hbmod.py ../blonda-fm1/moduler/one` i fm1-dock. Modulen
 installeras genom att släppa `.dock`-filen i fm1-dock:s
 [konsol](https://joakimeriksson.github.io/fm1-dock/#console) (Chrome/Edge, FM-1 på USB), eller med

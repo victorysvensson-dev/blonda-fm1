@@ -137,6 +137,8 @@ jobs:
           <meta http-equiv="refresh" content="0; url=fm1-emu/?fw=fm1dock&flash=one.flash&script=one.txt">
           <p><a href="fm1-emu/?fw=fm1dock&flash=one.flash&script=one.txt">BLONDA ONE på FM-1 (fm1-emu)</a></p>
           HTML
+          # modulerna själva på sidan, för att hämtas med en länk: https://victorysvensson-dev.github.io/blonda-fm1/one.dock
+          cp "$GITHUB_WORKSPACE"/ut/*.dock "$GITHUB_WORKSPACE/sida/"
           ls -la "$GITHUB_WORKSPACE/sida" "$GITHUB_WORKSPACE/sida/fm1-emu" | head -40
 
       - name: Prova webbsidan i Chrome (skärmbild i loggen)

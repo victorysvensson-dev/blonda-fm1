@@ -12,12 +12,13 @@
 #include "hb_module.h"
 #include "one_presets.h"
 #include "bris_presets.h"
+#include "blonda_dot.h"
 
 #define NPRESETS (ONE_NPRESETS + BRIS_NPRESETS)
 #define BRIS0 (ONE_NPRESETS - 1)                /* BRIS-ljud nr i (1..89) har nummer BRIS0 + i; BRIS init är sist */
 #define NPMAX ((int)OP_N > (int)BP_N ? (int)OP_N : (int)BP_N)
-#define NX 23                                   /* modulens egna parametrar i det sparade: reverb 12, pump 4, ARP 4, SEQ 3 */
-#define SET_N (8 + NPMAX * 4 + 4 + NX + 5)      /* det sparade: 232 byte */
+#define NX 24                                   /* modulens egna parametrar i det sparade: reverb 12, pump 4, ARP 4, SEQ 3, tryck 1 */
+#define SET_N (8 + NPMAX * 4 + 4 + NX + 4)      /* det sparade: 232 byte */
 
 /* ---- skärmen: 240 x 240 RGB565, som panelen får den (gfx.c skickar byten omvända) */
 static uint16_t fb[240 * 240];
@@ -175,6 +176,29 @@ static int drawn(const char *t)
     look = 0;
     return found;
 }
+/* Står namnet t i prickdisplayen? Varje prick i varje tecken läses av på skärmen (namnfönstret börjar vid 4, 46):
+ * tänd där tecknet har en prick, släckt annars, och ingenting tänt efter namnet. */
+static int name_shows(const char *t)
+{
+    const uint16_t yel = HB_RGB(0xE9, 0xC5, 0x4A);
+    int len1, start2, pitch = dot_layout(t, &len1, &start2), lines = start2 ? 2 : 1, line, i, gr, gc, x, y, n;
+    M->draw(1);
+    for (line = 0; line < lines; line++) {
+        const char *u = line ? t + start2 : t;
+        n = line ? (int)strlen(u) : len1;
+        for (i = 0; i <= n; i++) {                           /* (ett tecken till: tomt efter namnet) */
+            const uint8_t *g = i < n ? dot_glyph(u[i]) : 0;
+            if (i == n && (i * 6 + 5) * pitch + 2 >= DOT_W) break;
+            for (gr = 0; gr < 7; gr++)
+                for (gc = 0; gc < 5; gc++) {
+                    int want = g ? g[gr] >> (4 - gc) & 1 : 0;
+                    dot_at(pitch, lines, line, i, gc, gr, &x, &y);
+                    if ((fb[(46 + y) * 240 + 4 + x] == yel) != want) return 0;
+                }
+        }
+    }
+    return 1;
+}
 /* som drawn, men ritar bara det som ändrats (som fm1-dock gör mellan knapptryckningarna) */
 static int redrawn(const char *t)
 {
@@ -208,7 +232,8 @@ int main(int argc, char **argv)
     CHECK(M->init(&HOST) == 0, "init");
     M->draw(1);
     shot(base, n++);                            /* 00: start, one (3 OSC) */
-    CHECK(drawn("001") && drawn("3 OSC V2.0"), "start: ljud 001 med trioscillatormotorn, versionen visas");
+    CHECK(drawn("001") && drawn("3 OSC V2.1"), "start: ljud 001 med trioscillatormotorn, versionen visas");
+    CHECK(name_shows("one") && !name_shows("ono") && !name_shows("on"), "namnet står i prickdisplayen, prick för prick (ONE)");
 
     M->note(0, 60, 100); M->note(0, 64, 90); M->note(0, 67, 80);
     audio(600);
@@ -247,14 +272,16 @@ int main(int argc, char **argv)
     btn(HB_BTN_FX); M->draw(0); shot(base, n++);     /* 13: FX */
     btn(HB_BTN_FX); CHECK(drawn("RUM  2/5"), "3 OSC: reverbets sidor finns på FX");
     btn(HB_BTN_GLO); M->draw(0); shot(base, n++);    /* 14: VOICE */
-    CHECK(drawn("VOICE"), "3 OSC: en sida på GLO");
+    CHECK(drawn("VOICE  1/2"), "3 OSC: VOICE och TOUCH på GLO");
+    CHECK(name_shows("moogbas*"), "ändrat ljud: stjärnan i prickdisplayen (MOOGBAS*)");
 
     /* ---- BRIS-motorns sidor, och reverbets och pumpens */
     prog(BRIS0 + 5);                            /* Unison Bass */
     M->draw(0);
     shot(base, n++);                            /* 15 */
-    CHECK(drawn("054") && drawn("BRIS V2.0"), "ljud 054 hör till BRIS-motorn");
-    CHECK(drawn("VOICE  1/2"), "motorbyte: samma knapp, BRIS-motorns sidor (VOICE 1/2)");
+    CHECK(drawn("054") && drawn("BRIS V2.1"), "ljud 054 hör till BRIS-motorn");
+    CHECK(drawn("VOICE  1/3"), "motorbyte: samma knapp, BRIS-motorns sidor (VOICE 1/3)");
+    CHECK(name_shows("Unison Bass"), "elva tecken: mindre prickar, en rad (UNISON BASS)");
     btn(HB_BTN_SEL); enc(HB_ENC_KNOB1, -20); enc(HB_ENC_KNOB2, 30);
     M->note(0, 36, 120); audio(800); M->note(0, 36, 0); audio(400);
     M->draw(0);
@@ -267,7 +294,7 @@ int main(int argc, char **argv)
     enc(HB_ENC_KNOB4, -1);
     btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 22: RUM TONE */
     prog(40);                                        /* ekopluck (3 OSC): sidan ligger kvar, reverbet också */
-    CHECK(drawn("RUM TONE  3/5") && drawn("3 OSC V2.0"), "motorbyte: reverbets sida ligger kvar");
+    CHECK(drawn("RUM TONE  3/5") && drawn("3 OSC V2.1"), "motorbyte: reverbets sida ligger kvar");
     prog(BRIS0 + 5);
     CHECK(drawn("RUM TONE  3/5"), "och tillbaka");
     btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 23: RUM SPACE */
@@ -297,17 +324,30 @@ int main(int argc, char **argv)
 
     /* PRESETS-ratten går runt alla 140, och banken (CC 0) når ljuden över 127 */
     prog(0); enc(HB_ENC_PRESETS, -1);
-    CHECK(drawn("139") && drawn("BRIS V2.0") && drawn("init"), "PRESETS bakåt från 000: 139, BRIS init");
+    CHECK(drawn("139") && drawn("BRIS V2.1") && name_shows("init"), "PRESETS bakåt från 000: 139, BRIS init");
     enc(HB_ENC_PRESETS, 1);
-    CHECK(drawn("000") && drawn("3 OSC V2.0"), "och framåt: 000 igen");
+    CHECK(drawn("000") && drawn("3 OSC V2.1"), "och framåt: 000 igen");
     M->midi(0xB0, 0, 1); M->midi(0xC0, 10, 0);
     CHECK(drawn("138"), "MIDI: bank 1, program 10 = ljud 138");
     M->midi(0xC0, 12, 0);
     CHECK(drawn("138"), "MIDI: ett nummer över det sista ljudet gör ingenting");
     M->midi(0xB0, 0, 0); M->midi(0xC0, 49, 0);
-    CHECK(drawn("049") && drawn("3 OSC V2.0"), "MIDI: bank 0, program 49 = sista ljudet i trioscillatormotorn");
+    CHECK(drawn("049") && drawn("3 OSC V2.1"), "MIDI: bank 0, program 49 = sista ljudet i trioscillatormotorn");
     M->midi(0xC0, 50, 0);
-    CHECK(drawn("050") && drawn("BRIS V2.0") && drawn("Poly Magic"), "MIDI: program 50 = BRIS första ljud");
+    {   /* de längsta namnen: två rader */
+        int p, two = 0, bad = 0;
+        for (p = 0; p < NPRESETS; p++) {
+            const char *nm = p < ONE_NPRESETS ? ONE_PRESETS[p].name : BRIS_PRESETS[p == NPRESETS - 1 ? 0 : p - ONE_NPRESETS + 1].name;
+            int l1, s2;
+            prog(p);
+            dot_layout(nm, &l1, &s2);
+            if (s2) two++;
+            if (!name_shows(nm)) { printf("  namnet syns inte rätt: %d %s\n", p, nm); bad++; }
+        }
+        CHECK(bad == 0 && two >= 2, "alla 140 namn står rätt i prickdisplayen, de längsta på två rader");
+        prog(50);
+    }
+    CHECK(drawn("050") && drawn("BRIS V2.1") && name_shows("Poly Magic"), "MIDI: program 50 = BRIS första ljud");
 
     for (i = 0; i < 200; i++) enc(HB_ENC_PRESETS, 1);   /* runt och runt */
     for (i = 0; i < 200; i++) enc(HB_ENC_KNOB1 + (i & 3u), (int32_t)(i % 7u) - 3);
@@ -675,11 +715,11 @@ int main(int argc, char **argv)
             memcpy(&e, store + 8 + NPMAX * 4, 4);
             printf("  sparat (%s): %u byte, version %u, motor %u, ljud %u i motorn, era %.1f, reverbmix %u, pumpdjup %u, tempo %u\n", e2 ? "BRIS" : "3 OSC", store_n, store[4], x[NX], store[5], (double)e, x[0], x[12], x[15]);
             CHECK(e == 30.f, "ERA sparas med ljudet (TAPE 30)");
-            CHECK(store[4] == 1 && x[NX] == e2 && store[5] == 7 && x[0] == 40 && x[12] == 60 && x[15] == 108, "ljudets motor och nummer i motorn, reverb, pump och tempo sparas");
+            CHECK(store[4] == 2 && x[NX] == e2 && store[5] == 7 && x[0] == 40 && x[12] == 60 && x[15] == 108, "ljudets motor och nummer i motorn, reverb, pump och tempo sparas");
             M->release();
             CHECK(M->init(&HOST) == 0, "ny start");
             M->draw(1); shot(base, n++);        /* 33, 35: samma ljud, ändrat (*), TAPE 30 */
-            CHECK(drawn(e2 ? "BRIS V2.0" : "3 OSC V2.0") && drawn(e2 ? "056" : "007"), e2 ? "BRIS-ljudet kommer tillbaka med BRIS-motorn" : "3 OSC-ljudet kommer tillbaka med sin motor");
+            CHECK(drawn(e2 ? "BRIS V2.1" : "3 OSC V2.1") && drawn(e2 ? "056" : "007"), e2 ? "BRIS-ljudet kommer tillbaka med BRIS-motorn" : "3 OSC-ljudet kommer tillbaka med sin motor");
             now_ms += 2000; M->draw(0);
             {   /* kom tillbaka: spara igen utan att röra något ger samma bytes */
                 uint8_t was[240]; uint32_t was_n = store_n;
@@ -704,12 +744,59 @@ int main(int argc, char **argv)
         memcpy(store, v1, sizeof v1); store_n = sizeof v1;
         M->release();
         CHECK(M->init(&HOST) == 0, "start med inställningar från ONE 1.0");
-        CHECK(drawn("009") && drawn("VOICE") && drawn("3 OSC V2.0"), "ONE 1.0: ljudet och sidan kommer tillbaka");
+        CHECK(drawn("009") && drawn("VOICE  1/2") && drawn("3 OSC V2.1"), "ONE 1.0: ljudet och sidan kommer tillbaka");
         btn(HB_BTN_SAVE);
         x = store + 8 + NPMAX * 4 + 4;
         { float e; memcpy(&e, store + 8 + NPMAX * 4, 4);
           CHECK(store_n == SET_N && !memcmp(store, "ONE2", 4) && x[NX] == 0 && store[5] == 9 && store[7] == 1 && !memcmp(store + 8, p0, sizeof p0) && e == 45.f && x[0] == 0 && x[12] == 0 && x[15] == 120,
                 "ONE 1.0 laddas: parametrarna och ERA kvar, reverb och pump av, sparas i det nya formatet"); }
+    }
+
+    {   /* sparat av ONE 2.0 (version 1: utan Pressure, så motorn och ARP låg en byte tidigare, och sidan TOUCH fanns
+         * inte): BRIS-ljudet, ARP på och ARP-sidan kommer tillbaka */
+        uint8_t v[240];
+        uint8_t *x = v + 8 + NPMAX * 4 + 4;
+        M->release(); store_n = 0; M->init(&HOST);
+        prog(BRIS0 + 7); M->midi(0xB0, 91, 51); btn(HB_BTN_ARP); btn(HB_BTN_SAVE);
+        memcpy(v, store, SET_N);
+        v[4] = 1; v[6] = 13;                    /* version 1; ARP var BRIS-motorns sida 13 (nu 14) */
+        x[23] = 1; x[24] = 1; x[25] = x[26] = x[27] = 0;   /* motor BRIS, ARP på */
+        memcpy(store, v, SET_N);
+        M->release();
+        CHECK(M->init(&HOST) == 0, "start med inställningar från ONE 2.0");
+        CHECK(drawn("056") && drawn("BRIS V2.1") && drawn("ARP  ON") && leds[HB_BTN_ARP] == 1u, "ONE 2.0: ljudet, motorn, ARP och sidan kommer tillbaka");
+        btn(HB_BTN_SAVE);
+        x = store + 8 + NPMAX * 4 + 4;
+        CHECK(store[4] == 2 && x[0] == 40 && x[23] == 0 && x[NX] == 1 && x[NX + 1] == 1, "och sparas i det nya formatet, med Pressure av");
+        btn(HB_BTN_ARP);
+    }
+    {   /* Tangenternas tryck (aftertouch). FM-1:ans tangenter ger fullt tryck redan vid ett vanligt anslag, och motorerna
+         * tar trycket som modhjulet (vibrato). Pressure 0, som det är från början: trycket ändrar ingenting. Pressure
+         * uppvridet: trycket hörs, och det kommer mjukt (inget språng i ljudet när trycket slår till). */
+        static int32_t one[3][256 * 2 * 80];
+        int pass, b, i2;
+        double e = 0, d1 = 0, d2 = 0;
+        for (pass = 0; pass < 3; pass++) {
+            M->release(); store_n = 0; M->init(&HOST);
+            prog(BRIS0 + 64);                   /* MPE Lead: modhjulet ger vibrato */
+            if (pass == 2) { btn(HB_BTN_GLO); btn(HB_BTN_GLO); btn(HB_BTN_GLO); enc(HB_ENC_KNOB1, 100); }   /* TOUCH: Pressure 100 */
+            M->note(0, 62, 100);
+            for (b = 0; b < 80; b++) {
+                if (b == 20 && pass) M->midi(0xA0, 62, 127);
+                memset(one[pass] + b * 512, 0, 512 * 4); M->render(one[pass] + b * 512, 256);
+            }
+            if (pass == 2) CHECK(drawn("TOUCH  3/3") && drawn("Pressure") && drawn("100"), "sidan TOUCH (GLO): Pressure");
+            M->midi(0xA0, 62, 0); M->note(0, 62, 0);
+        }
+        for (i2 = 0; i2 < 256 * 2 * 80; i2++) {
+            e += (double)one[0][i2] * one[0][i2];
+            d1 += (double)(one[0][i2] - one[1][i2]) * (one[0][i2] - one[1][i2]);
+            d2 += (double)(one[0][i2] - one[2][i2]) * (one[0][i2] - one[2][i2]);
+        }
+        printf("  tryck på tangenten: Pressure 0 skillnad %.1f dB, Pressure 100 skillnad %.1f dB\n", 10 * log10(d1 / e + 1e-30), 10 * log10(d2 / e + 1e-30));
+        CHECK(e > 0 && d1 == 0, "Pressure 0 (från början): tangentens tryck ändrar inte ljudet");
+        CHECK(d2 > e * 0.01, "Pressure 100: trycket hörs (vibrato efter ljudets MW-rattar)");
+        blocks_peak(400);
     }
 
     /* ---- ARP och SEQ (stegens ordning och takt testas för sig i test/spel_test.c; här: knappar, skärm, lysdioder,
