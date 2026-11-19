@@ -55,6 +55,8 @@ typedef struct {
     int32_t pi0, pr, api[4], wi[8], started, dirty, gk;
     /* koefficienter ur parametrarna (räknas när en parameter ändrats) */
     float c_dk, c_lck, c_hrk, c_sck, c_irt, c_dryG, c_wetG, c_ok;
+    float gD, gW, gstep;                        /* torr och våt nivå som de låter nu (rum_glide), steget per sampel */
+    int32_t gsnap;                              /* nästa koefficienter gäller direkt (efter nollställning) */
     int32_t c_hc, c_pdd;
     /* arbetsminne för ett block */
     float zb[8][RUM_K], xb[RUM_K], hb[RUM_K];
@@ -66,6 +68,10 @@ typedef struct {
 void rum_init(rum_t *r);                        /* standardvärden (som pluggen) och nollställt */
 void rum_reset(rum_t *r);                       /* nollställ tillståndet, behåll parametrarna */
 void rum_set(rum_t *r, int param, float v);     /* 0..1 */
+/* Mixen (torr och våt nivå) glider till ett nytt värde på n sampel i stället för att hoppa dit; 0 = hoppar (som
+ * pluggen, standard). BLONDA ONE använder det när ljud med olika mycket reverb byts: klangen tonar då ut. */
+void rum_glide(rum_t *r, uint32_t n);
+float rum_wet_now(const rum_t *r);              /* den våta nivån som den låter nu (0: klangen hörs inte) */
 float rum_get(const rum_t *r, int param);
 
 /* originalet: klang och mix på plats */

@@ -1,8 +1,8 @@
 # BLONDA ONE för M-VAVE FM-1
 
 BLONDA ONE är en synth med två ljudmotorer, som modul för [fm1-dock](https://github.com/joakimeriksson/fm1-dock) på
-M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.1 (står överst på skärmen, efter
-motorns namn: `3 OSC V2.2` eller `BRIS V2.2`).
+M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.3 (står överst på skärmen, efter
+motorns namn: `3 OSC V2.3` eller `BRIS V2.3`).
 
 Skärmen är BLONDAs: en gul prickdisplay. Ljudets namn står i prickar i ett fönster med svaga prickar bakom, som
 displayen i BLONDAs pluggar och SEQ.3, och rattarnas värden visas som rader av prickar. Färgerna är BLONDAs (gult
@@ -18,7 +18,22 @@ eko. Före motorerna, för alla ljud: **ARP** (arpeggio) och **SEQ** (stegsekven
 **PUMP** (ducking i takt) och **ERA** (band och lofi).
 
 Ljuden i ordning: 000 init (3 OSC) · 001 one (signaturljudet) · 13 basar · 9 lead · 13 poly och pad · 7 tangenter
-och pluck · 6 effektljud · 050–138 BRIS 89 ljud (Poly Magic först) · 139 init (BRIS).
+och pluck · 6 effektljud · 050–138 BRIS 89 ljud (Poly Magic först) · 139 init (BRIS) · 140–159 tjugo nya 3 OSC-ljud
+efter klassiker som många älskar (version 2.3): hoppbrass, filmbrass, nattpad, funkmoog, visslead, glidlead,
+supersåg, trancepluck, stråkmaskin, änglakör, arenabrass, syntwavebas, syntwavearp, husorgel, morrsvep, slapbas,
+mjukpwm, lofi-keys, svävbas, åttabit. Skärmen skriver å ä ö som a a o.
+
+## Ljudets effekter
+
+Varje ljud har sina egna effekter: reverbet RUM (alla rattar), PUMP och ERA laddas med ljudet. Pads får stora
+mörka rum, basar inget eller nästan inget reverb, lead lite rum med DUCK, orgel och keys ett litet ROOM, och några ljud har mer:
+supersåg pumpar i 1/4, lofi-keys har band (TAPE), åttabit LOFI. Effekterna står i `src/ljud.h`, som skrivs av
+`tools/gen_ljud.py` (ändras inte för hand); där bestäms också ljudens ordning. Vrids en effektratt blir ljudet
+ändrat (stjärna efter namnet), och SAVE sparar det med effekterna.
+
+Byts ljudet medan reverbet klingar, klingar förra ljudets klang vidare som den var tills nästa ton spelas. Då tonas
+den ut på 23 ms, reverbet töms och ställs in efter det nya ljudet, och tonen får det nya ljudets reverb. Vrids en
+reverbratt innan dess gäller det nya ljudets reverb direkt. Så hörs inget hopp i klangen när ljudet byts.
 
 Fram till version 1.0 var det två moduler (BRIS 3.0 och ONE 1.0). Nu är allt en modul: ett ljud som sparats i
 ONE 1.0 eller 2.0 följer med, BRIS-modulen kan tas bort från FM-1:an.
@@ -26,7 +41,7 @@ ONE 1.0 eller 2.0 följer med, BRIS-modulen kan tas bort från FM-1:an.
 ## Byta mellan motorerna
 
 Det märks inte mer än ett vanligt ljudbyte. Den gamla motorns toner tonas ut på ett anrop (5,8 ms, inget knäpp),
-ekot och reverbet klingar vidare, och böj, modhjul, tryck och pedal följer med till den nya motorn. Skärmen behåller
+ekot och reverbet klingar vidare (reverbet tills nästa ton, se ovan), och böj, modhjul, tryck och pedal följer med till den nya motorn. Skärmen behåller
 sidan om den nya motorn har samma (reverbets sidor, FILTER, EG, LFO), annars knappens första sida. Ensemble, eko
 och utgång är en enda uppsättning för båda motorerna (`src/bfx_fm1.c`).
 
@@ -60,7 +75,7 @@ vågform, och en oscillator på nivå 0 räknas inte alls.
 
 ## Ljudet är testat mot blonda-motor
 
-- **`test/likhet.py`, `test/bris/likhet.py`** – alla 140 ljud med samma toner, varje motor mot sitt original: nivå
+- **`test/likhet.py`, `test/bris/likhet.py`** – alla 160 ljud med samma toner, varje motor mot sitt original: nivå
   (±0,25 dB), klang i 1/3-oktavband (≤ 0,5 dB) och vågform (korrelation ≥ 0,98). Senast: värst 0,03 dB nivå,
   0,20 dB klang. Två 3 OSC-ljud där filtret självsvänger utan oscillator (visselfilter, laser) bedöms på nivå och
   klang: svängningen växer fram ur grundbruset och får en annan fas vid minsta avrundningsskillnad.
@@ -69,7 +84,7 @@ vågform, och en oscillator på nivå 0 räknas inte alls.
   vrids, självsvängning, alla LFO-former, ljudbyte och röstläge under spel, ekot ändras, ytterlägen, full volym;
   för 3 OSC också vågform, fotläge, stämning, brus, drivning, pulsbredd och PWM under spel.
 - **`test/modul_host.c`** – modulen körs oförändrad i en låtsas-FM-1 med fm1-dock:s eget typsnitt: skärmbilder av
-  båda motorernas sidor, rattar, knappar, lysdioder, MIDI med bank, alla 140 ljud hörs och ingen klippning, ARP och
+  båda motorernas sidor, rattar, knappar, lysdioder, MIDI med bank, alla 160 ljud hörs och ingen klippning, ljudens egna effekter, klangen vid ljudbyte, ARP och
   SEQ (i ljudet, på skärmen, med MIDI-klocka, sparade),
   motorbyte under en ton (inget knäpp, ingen ton hänger kvar, klangen ligger kvar, böj och hjul följer med),
   reverbet dör ut till tystnad, pumpen duckar på slaget och följer MIDI-klocka, två kärnor låter som en, anrop av
@@ -87,8 +102,8 @@ Webbemulatorn i `web/` kör samma modul i webbläsaren.
 
 | | |
 |---|---|
-| tangenter / MIDI | 6 röster, velocity, pitch bend, modhjul (CC1), tryck, sustain (CC64). Program change = ljud 0–127; CC 0 = 1 först ger ljud 128–139. MIDI-klocka, start och stopp: ARP, SEQ och PUMP följer |
-| PRESETS | byt ljud (140 st, laddas direkt) |
+| tangenter / MIDI | 6 röster, velocity, pitch bend, modhjul (CC1), tryck, sustain (CC64). Program change = ljud 0–127; CC 0 = 1 först ger ljud 128–159. MIDI-klocka, start och stopp: ARP, SEQ och PUMP följer |
+| PRESETS | byt ljud (160 st, laddas direkt med sina effekter) |
 | KNOB1–4 | de fyra parametrarna som visas |
 | SELECT | nästa / förra sidan |
 | ALGORITHM | **ERA**: 0 MODERN (rent), 1–60 TAPE (kassett som slits mer och mer), 61–100 LOFI (färre bitar, lägre samplingsfrekvens). Visas uppe till höger på skärmen, sparas med SAVE, MIDI CC 77 |
@@ -156,8 +171,7 @@ långsam rörelse, höskärning, bredd och ducking efter det man spelar.
 | RUM TONE | LOW CUT · HIGH CUT (filtren på klangen) · DAMPING · MOVEMENT |
 | RUM SPACE | PREDELAY · WIDTH · DUCK (klangen viker undan medan man spelar) · REVERB LEVEL |
 
-MIDI CC 91 är mixen. Reverbet hör till modulen, inte till ljudet: det ligger kvar när man byter ljud, och sparas med
-SAVE. Det ligger i `gemensamt/effekter/rum_fm1.c` och testas mot blonda-motor i 15 fall
+MIDI CC 91 är mixen. Reverbet hör till ljudet (se Ljudets effekter) och sparas med SAVE. Det ligger i `gemensamt/effekter/rum_fm1.c` och testas mot blonda-motor i 15 fall
 (`gemensamt/test/rum_test.py`: skillnad −50 till −78 dB när inget vrids). Skillnader mot pluggen: linjerna ligger i
 16 bitar med brusformning (avrundningsbruset läggs i diskanten, där linjernas dämpning tar bort det) i stället för
 double, och klangen räknas ur ljudet före varje block om 256 sampel, så en predelay under 5,8 ms blir 5,8 ms.
@@ -168,6 +182,7 @@ Som en kompressor med sidokedja från en bastrumma som inte hörs: på varje sla
 tillbaka. PUMP-sidan: PUMP DEPTH (0 = av) · PUMP RATE (1/1 till 1/16) · PUMP TARGET (REVERB: bara klangen pumpar,
 ALL: allt) · TEMPO (40–240 BPM). Kommer MIDI-klocka följer pumpen den i stället, i takt och på slaget, och skärmen
 visar `EXT` och klockans tempo; tystnar klockan i två sekunder gäller den egna takten igen. MIDI CC 92 är djupet.
+Pumpen hör till ljudet, TEMPO till modulen.
 PUMP finns bara här (inte i blonda-motor): `gemensamt/effekter/pump_fm1.c`, test i `gemensamt/test/pump_test.c`.
 
 ## ERA – inbyggt band och lofi

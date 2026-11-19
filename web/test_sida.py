@@ -97,8 +97,8 @@ with sync_playwright() as p:
     check(on == 3, f"tre tangenter lyser ({on})")
     pg.wait_for_timeout(200)
     pg.screenshot(path=os.path.join(OUT, "webb-2-spelar.png"))
-    voices = pg.evaluate("""() => { const g = document.getElementById('lcd').getContext('2d').getImageData(170, 86, 66, 8).data;
-      let n = 0; for (let r = 0; r < 6; r++) { const i = (4 * 240 * 0 + (r * 11 + 4) * 4); if (g[i] > 200) n++; } return n; }""")
+    voices = pg.evaluate("""() => { const g = document.getElementById('lcd').getContext('2d').getImageData(166, 105, 66, 1).data;
+      let n = 0; for (let r = 0; r < 6; r++) { const i = (r * 11 + 3) * 4; if (g[i] > 200) n++; } return n; }""")
     check(voices == 3, f"skärmen visar tre röster som låter ({voices})")
     pg.mouse.up(); pg.keyboard.up("KeyD"); pg.keyboard.up("KeyG")
     pg.wait_for_timeout(200)
@@ -200,7 +200,7 @@ with sync_playwright() as p:
     lvl = pg.evaluate(TAP); pg.keyboard.up("KeyA")
     check(lvl > 0.05, f"ONE spelar igen efter bytet ({lvl:.3f})")
     # Två motorer i en synth. Ljudet som sparades (002, moogbas) hör till 3 OSC: motorn och versionen står överst,
-    # tre toner hörs, EDIT bläddrar fyra oscillatorsidor. Tre steg bakåt på PRESETS ger 139, BRIS-motorns init:
+    # tre toner hörs, EDIT bläddrar fyra oscillatorsidor. 23 steg bakåt på PRESETS (förbi 159-140, de nya 3 OSC-ljuden) ger 139, BRIS-motorns init:
     # raden överst byts, det låter, och EDIT har en enda sida.
     lcd = lambda: pg.evaluate("() => { const g = document.getElementById('lcd').getContext('2d').getImageData(0,76,240,164).data; let h=0; for (const v of g) h=(h*31+v)|0; return h; }")
     head = lambda: pg.evaluate("() => { const g = document.getElementById('lcd').getContext('2d').getImageData(0,26,160,18).data; let h=0; for (const v of g) h=(h*31+v)|0; return h; }")
@@ -253,7 +253,7 @@ with sync_playwright() as p:
     pg.wait_for_timeout(800)
     h3o = head()
     pg.mouse.move(kp["x"] + 29, kp["y"] + 29)
-    for _ in range(3):
+    for _ in range(23):
         pg.mouse.wheel(0, 100); pg.wait_for_timeout(150)
     pg.wait_for_timeout(250)
     check(head() != h3o, "PRESETS bakåt förbi 000: raden överst byts (139, BRIS-motorn)")
@@ -262,7 +262,7 @@ with sync_playwright() as p:
     lvl = pg.evaluate(TAP); pg.keyboard.up("KeyA")
     check(lvl > 0.05, f"BRIS-motorn spelar efter motorbytet ({lvl:.3f})")
     # (sidans namn och de fyra raderna, utan rösternas rutor som slocknar medan tonen klingar ut)
-    sida = lambda: pg.evaluate("() => { const c = document.getElementById('lcd').getContext('2d'); let h=0; for (const [x,y,w,hh] of [[0,80,160,18],[0,100,240,140]]) for (const v of c.getImageData(x,y,w,hh).data) h=(h*31+v)|0; return h; }")
+    sida = lambda: pg.evaluate("() => { const c = document.getElementById('lcd').getContext('2d'); let h=0; for (const [x,y,w,hh] of [[0,80,160,32],[0,112,240,128]]) for (const v of c.getImageData(x,y,w,hh).data) h=(h*31+v)|0; return h; }")
     pg.click("text=EDIT"); pg.wait_for_timeout(250); e1 = sida()
     pg.click("text=EDIT"); pg.wait_for_timeout(250)
     check(sida() == e1, "BRIS-motorn: EDIT har en enda sida (OSC)")

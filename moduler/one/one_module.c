@@ -37,12 +37,13 @@
 #include "rum_fm1.h"
 #include "pump_fm1.h"
 #include "spel_fm1.h"
+#include "ljud.h"
 #include "blonda_dot.h"
 
 #ifndef HB_F_MIDI_RT
 #define HB_F_MIDI_RT 16u                        /* nyare fm1-dock: MIDI-klockan kommer i ljudavbrottet (annars huvudloopen) */
 #endif
-#define ONE_VERSION "V2.2"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
+#define ONE_VERSION "V2.3"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
 
 static const hb_host_t *H;
 static char *put_int(char *s, int32_t v);
@@ -76,7 +77,13 @@ static const xparam_t XPAR[XN] = {
 static float xv[XN];
 static rum_t rum;
 static pump_t pump;
-static volatile int rum_on;                     /* reverbet räknas (mix över 0) */
+static volatile int rum_on;                     /* reverbet räknas (mixen, eller där den är på väg ner, över 0) */
+static volatile int rum_switch;                 /* ett nytt ljud har andra reverbinställningar (render):
+                                                 * 1: förra ljudets klang klingar vidare som den var, tills en ton spelas
+                                                 *    eller den har klingat ut;
+                                                 * 2: klangen tonas ut snabbt, sedan nollställs reverbet och ställs in efter
+                                                 *    det nya ljudet, och mixen glider in */
+static int loading;                             /* load_preset sätter ljudets effekter (set_x) */
 static volatile uint32_t rum_gen;               /* räknas upp när reverbet nollställs: klang räknad i förväg gäller inte längre */
 
 /* ------------------------------------------------------------------ sidor: en uppsättning per motor */
@@ -128,7 +135,7 @@ static const page_t PAGES_BRIS[] = {
 };
 
 /* ------------------------------------------------------------------ motorerna */
-enum { ENG_ONE, ENG_BRIS };
+/* (ENG_ONE, ENG_BRIS: src/ljud.h) */
 typedef struct {
     const char *tag;                            /* på skärmen, före versionen */
     int np;                                     /* antal parametrar */
@@ -167,15 +174,17 @@ static const engine_t *AE = &ENGINES[ENG_ONE];
 #define PAGES (E->pages)
 #define NPAGES (E->npages)
 
-/* ljuden i ordning: trioscillatormotorns (init först), sedan BRIS, och sist BRIS eget init */
-#define NPRESETS (ONE_NPRESETS + BRIS_NPRESETS)
-static int preset_engine(int i) { return i < ONE_NPRESETS ? ENG_ONE : ENG_BRIS; }
-static int preset_index(int i) { return i < ONE_NPRESETS ? i : (i == NPRESETS - 1 ? 0 : i - ONE_NPRESETS + 1); }
+/* ljuden i ordning (src/ljud.h, genererad av tools/gen_ljud.py): 3 OSC 0-49, BRIS 1-89, BRIS init, 3 OSC 50-.
+ * Varje ljud har sin motor, sitt ljud i motorn och sina effekter (reverb, pump, ERA). */
+#define NPRESETS NLJUD
+typedef char ljud_one_ok[ONE_NPRESETS + BRIS_NPRESETS == NLJUD ? 1 : -1];   /* (alla motorernas ljud finns med) */
+static int preset_engine(int i) { return LJUD[i].eng; }
+static int preset_index(int i) { return LJUD[i].idx; }
 /* och tillbaka: ljud nr idx i motorn e, eller -1 */
 static int preset_number(int e, int idx)
 {
-    if (e == ENG_ONE) return idx < ONE_NPRESETS ? idx : -1;
-    if (e == ENG_BRIS) return idx == 0 ? NPRESETS - 1 : idx < BRIS_NPRESETS ? ONE_NPRESETS + idx - 1 : -1;
+    int i;
+    for (i = 0; i < NLJUD; i++) if (LJUD[i].eng == e && LJUD[i].idx == idx) return i;
     return -1;
 }
 static const char *preset_name(int i)
@@ -362,11 +371,21 @@ static void set_x(int p, float v)
     v = clampf(v, d->lo, d->hi);
     if (d->integer) v = (float)(int32_t)(v + 0.5f);
     xv[p - XBASE] = v;
-    if (d->rum >= 0) rum_set(&rum, d->rum, v);
-    if (p == XP_rmix) {
-        if (v > 0.f && !rum_on) { rum_reset(&rum); rum_gen++; rum_on = 1; }
-        else if (v <= 0.f) rum_on = 0;
+    if (d->rum >= 0) {
+        /* Ett nytt ljud medan reverbet klingar: ljudavbrottet byter inställningar först när klangen tonat ut (ett hopp i
+         * storlek, predelay eller filter hörs som ett knäpp eller ett glid i klangen). Ratten: direkt, och mixen glider
+         * dit (rum_glide i init). */
+        if (loading && rum_on) { if (rum_get(&rum, d->rum) != v || rum_switch) rum_switch = 1; }
+        else {
+            if (rum_switch == 1) {              /* en ratt vrids medan förra ljudets klang klingar: ljudets reverb nu */
+                int k2;
+                rum_switch = 0;
+                for (k2 = 0; k2 <= XP_rout - XBASE; k2++) rum_set(&rum, XPAR[k2].rum, xv[k2]);
+            }
+            rum_set(&rum, d->rum, v);
+        }
     }
+    if (p == XP_rmix && v > 0.f && !rum_on) { rum_reset(&rum); rum_gen++; rum_on = 1; }
     else if (p == XP_pdepth) pump.depth = v;
     else if (p == XP_prate) pump.rate = (int32_t)v;
     else if (p == XP_bpm) pump.bpm = v;
@@ -382,7 +401,11 @@ static void set_x(int p, float v)
 
 static void set_param(int p, float v)
 {
-    if (p >= XBASE) { set_x(p, v); return; }    /* hör till modulen, inte till ljudet: ingen stjärna */
+    if (p >= XBASE) {                           /* reverb, pump: hör till ljudet (stjärna); takt, ARP, SEQ: till modulen */
+        set_x(p, v);
+        if (p <= XP_ptarget) edited = 1;
+        return;
+    }
     E->set(p, v);
     edited = 1;
 }
@@ -423,6 +446,11 @@ static void load_preset(int i)
     nw->load_preset(preset_index(preset));
     eng = e;
     E = nw;
+    loading = 1;
+    for (k = 0; k <= XP_ptarget - XBASE; k++)   /* ljudets effekter: reverb, pump (src/ljud.h) */
+        set_x(XBASE + k, XPAR[k].integer ? (float)LJUD[preset].fx[k] : (float)LJUD[preset].fx[k] * 0.01f);
+    loading = 0;
+    set_era((int32_t)LJUD[preset].fx[LJUD_NFX - 1]);   /* och ERA */
     edited = 0;
     if (nw != old) leds();
 }
@@ -468,7 +496,15 @@ static void q_put(uint32_t type, uint32_t a, uint32_t b)
     q[w] = (uint16_t)(type << 14 | (a & 127u) << 7 | (b & 127u));
     q_w = nx;
 }
-static void sp_note(int note, int vel) { const engine_t *e = E; if (vel) e->note_on(note, vel); else e->note_off(note); }
+static void sp_note(int note, int vel)
+{
+    const engine_t *e = E;
+    if (vel) {
+        if (rum_switch == 1) { rum_switch = 2; rum_glide(&rum, 1024); rum_set(&rum, RU_wet, 0.f); }   /* ny ton: förra
+                                                 * ljudets klang tonas ut på 23 ms, så att tonen får det nya ljudets reverb */
+        e->note_on(note, vel);
+    } else e->note_off(note);
+}
 static void sp_sustain(int down) { E->sustain(down); }
 static void sp_all_off(void) { E->all_notes_off(); }
 static const spel_out_t SP_OUT = {sp_note, sp_sustain, sp_all_off};
@@ -509,6 +545,18 @@ static void render(int32_t *out, uint32_t n)
         E->aftertouch(at_now);
     }
     spel_run(0, r_bpm, r_ext);                  /* det som ska börja nu (första tonen i ett arpeggio, PLAY) */
+    /* reverbets mix glider (rum_glide), också ner till noll: klangen från förra ljudet tonar ut i stället för att
+     * klippas, och reverbet slutar räknas först när den inte hörs */
+    if (rum_switch && !rum_on) rum_switch = 0;
+    if (rum_switch == 2 && rum_wet_now(&rum) <= 0.f) {   /* förra ljudets klang är uttonad: det nya ljudets reverb */
+        int k2;
+        for (k2 = 0; k2 <= XP_rout - XBASE; k2++) rum_set(&rum, XPAR[k2].rum, xv[k2]);
+        rum_reset(&rum); rum.gsnap = 0;          /* tomt (inget av den gamla klangen med nya längder); torr nivå glider */
+        rum_glide(&rum, 8820);
+        rum_gen++;
+        rum_switch = 0;
+    }
+    if (rum_on && !rum_switch && xv[XP_rmix - XBASE] <= 0.f && rum_wet_now(&rum) <= 0.f) rum_on = 0;
     while (n) {
         uint32_t k = plan(n), i, have, nk;
         int two, rv = rum_on, tp = tape_on, tail_out = 0, pre_out = 0, pumping, target = (int)xv[XP_ptarget - XBASE];
@@ -542,6 +590,11 @@ static void render(int32_t *out, uint32_t n)
             if (tail_out && H->c1_wait() != 0) {                    /* klangen blev inte klar: tyst klang i det här blocket */
                 for (i = 0; i < k; i++) wetL[i] = wetR[i] = 0.f;
                 rum_resync(&rum, k);
+            }
+            if (rum_switch == 1) {              /* förra ljudets klang: har den klingat ut (under 16 bitar)? */
+                float m = 0.f;
+                for (i = 0; i < k; i++) { float a = wetL[i] < 0.f ? -wetL[i] : wetL[i], b = wetR[i] < 0.f ? -wetR[i] : wetR[i]; if (a > m) m = a; if (b > m) m = b; }
+                if (m < 3e-5f) { rum_switch = 2; rum_glide(&rum, 1024); rum_set(&rum, RU_wet, 0.f); }
             }
             if (pumping && target == 0) for (i = 0; i < k; i++) { wetL[i] *= pgain[i]; wetR[i] *= pgain[i]; }
             rum_feed(&rum, bufL, bufR, k);
@@ -593,9 +646,9 @@ static void cc(uint32_t ch, uint32_t num, uint32_t val)
     case 71: set_param(E->cc[1], v); break;
     case 73: set_param(E->cc[2], v); break;
     case 72: set_param(E->cc[3], v); break;
-    case 77: set_era((int32_t)(val * 100u + 63u) / 127); break;   /* ERA */
-    case 91: set_x(XP_rmix, v); break;          /* reverbets mix */
-    case 92: set_x(XP_pdepth, v); break;        /* pumpens djup */
+    case 77: set_era((int32_t)(val * 100u + 63u) / 127); edited = 1; break;   /* ERA (hör till ljudet) */
+    case 91: set_x(XP_rmix, v); edited = 1; break;     /* reverbets mix */
+    case 92: set_x(XP_pdepth, v); edited = 1; break;   /* pumpens djup */
     default: break;
     }
 }
@@ -640,7 +693,7 @@ static void ui(uint32_t ev, int32_t arg)
         if (id >= HB_ENC_KNOB1 && id <= HB_ENC_KNOB4) turn(PAGES[page].p[id - HB_ENC_KNOB1], arg);
         else if (id == HB_ENC_PRESETS) load_preset(preset + arg);
         else if (id == HB_ENC_SELECT) { page = ((page + arg) % NPAGES + NPAGES) % NPAGES; leds(); }
-        else if (id == HB_ENC_ALGORITHM) set_era(era + arg);
+        else if (id == HB_ENC_ALGORITHM) { set_era(era + arg); edited = 1; }
         return;
     }
     if (HB_EV_KIND(ev) != HB_EV_BTN_DOWN) return;
@@ -754,6 +807,13 @@ static void draw_hint(int r)
     H->fill(8, y + 19, 224, 6, C_BLACK);
 }
 
+/* reverbet ska vara igång men är det inte: ljudavbrottet stängde av det (mixen hade glidit ner till noll) samtidigt som
+ * en ny mix sattes. Huvudloopen startar det då här (rum_reset är för tung för ljudavbrottet). */
+static void rum_check(void)
+{
+    if (!rum_on && xv[XP_rmix - XBASE] > 0.f) set_x(XP_rmix, xv[XP_rmix - XBASE]);
+}
+
 static void draw(uint32_t full)
 {
     int r, retitle = 0;
@@ -763,6 +823,7 @@ static void draw(uint32_t full)
     int rec = spel_recording(), play = spel_playing(), step = spel_step();
     uint32_t sp = (uint32_t)play | (uint32_t)rec << 1 | (uint32_t)(spel_set.arp_on != 0) << 2 | (uint32_t)spel_seq.len << 8 | (uint32_t)step << 16;
     int on_arp, on_seq, hint;
+    rum_check();
     if (full) {
         H->fill(0, HB_TOP, 240, 240 - HB_TOP, C_BLACK);
         shown.preset = shown.page = shown.edited = shown.saved = shown.era = shown.eng = -1;
@@ -865,6 +926,7 @@ static int init(const hb_host_t *h)
     era = 0; tape_on = 0;
     era_apply();
     rum_init(&rum);
+    rum_glide(&rum, 8820);                      /* mixen glider på 0,2 s när ljudet byts */
     pump_init(&pump);
     rum_on = 0; rum_gen++;
     spel_defaults();                            /* ARP av och en tom sekvens; den sparade sekvensen ur flashbanken */
