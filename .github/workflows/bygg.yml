@@ -73,8 +73,13 @@ jobs:
             echo "== $n: inskickad vid $done ms, toner vid $t_on ms"
             # PLAY (knapp 12) startar trummaskinens sekvenser; synthar bryr sig inte om den
             keys="$t_cc:mB04D3C,$t_cc:mB05B50,$t_cc:mB05C64,$t_on:12"; for nt in 30 37 3c 40 43 48; do keys="$keys,$t_on:m90${nt}64"; done; keys="$keys,$((t_on + 60)):12^"
+            # Hela inmatningen (modulen som SysEx, sedan $keys) läggs i en fil som fm1-live läser (@FIL): som
+            # miljövariabel, som dock.py emu --deploy lämnar den, ryms inte en modul över ungefär 56 KB (Linux
+            # tar högst 128 KB i en variabel).
+            python3 -c "import sys; sys.path.insert(0, 'tools'); import hbdeploy; open(sys.argv[2], 'w').write(','.join(hbdeploy.din_script(open(sys.argv[1], 'rb').read(), 1000)[0] + sys.argv[3].split(',')))" \
+              "$d" "$GITHUB_WORKSPACE/ut/$n-keys.txt" "$keys"
             FM1_LIVE=$GITHUB_WORKSPACE/fm1-emu/target/release/fm1-live python3 tools/dock.py emu --fwsc docs/fm1-dock-0.7.fwsc \
-              --deploy "$d" --ms "$t_end" --keys "$keys" \
+              --ms "$t_end" --keys "@$GITHUB_WORKSPACE/ut/$n-keys.txt" \
               --out "../ut/emu-$n" | tee "../ut/$n-last.txt"
             echo "== $n: fm1-dock:s logg och last"
             cat "../ut/emu-$n/log.txt" | tee -a "../ut/$n-last.txt"
