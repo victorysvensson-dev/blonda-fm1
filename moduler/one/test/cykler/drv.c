@@ -10,29 +10,34 @@
 static sliten_t tape;
 static rum_t rum;
 static pump_t pump;
-extern int ENGINE, PRESET, TAPE, RUM, PART;
+extern int ENGINE, PRESET, TAPE, RUM, PART, SPLIT;
 int ENGINE = 0, PRESET = 1, TAPE = 0;
 int RUM = 0;                                     /* 1 = klangen (kärna 1), 2 = mix och pump (kärna 0), 3 = båda */
 int PART = 0;                                    /* 0 = alla röster, 1 = bara röst 0..2 (det kärna 0 räknar med två kärnor), 2 = inga */
+int SPLIT = 0;                                   /* 1 = anropet räknas i två bitar (48 + 208 sampel), som när ARP eller SEQ har ett steg i det */
 float L[256], R[256], WL[256], WR[256], PG[256];
 volatile int stage;
 void *memset(void *d, int c, unsigned n) { unsigned char *p = d; while (n--) *p++ = (unsigned char)c; return d; }
 void *memcpy(void *d, const void *s, unsigned n) { unsigned char *p = d; const unsigned char *q = s; while (n--) *p++ = *q++; return d; }
 void *memmove(void *d, const void *s, unsigned n) { unsigned char *p = d; const unsigned char *q = s; if (p < q) while (n--) *p++ = *q++; else while (n--) p[n] = q[n]; return d; }
 
+static void part(unsigned n)
+{
+    unsigned i;
+    if (ENGINE) { bris_render_begin(n); bris_render_voices(0, PART == 2 ? 0 : PART ? 3 : 6, 0); bris_render_end(L, R); }
+    else { one_render_begin(n); one_render_voices(0, PART == 2 ? 0 : PART ? 3 : 6, 0); one_render_end(L, R); }
+    if (RUM & 1) rum_tail(&rum, WL, WR, n, 256);
+    if (RUM & 2) {
+        pump_gain(&pump, PG, n);
+        for (i = 0; i < n; i++) { WL[i] *= PG[i]; WR[i] *= PG[i]; }
+        rum_feed(&rum, L, R, n);
+        rum_mix(&rum, L, R, WL, WR, n);
+    }
+    if (TAPE) sliten_process(&tape, L, R, n);
+}
 static void block(void)
 {
-    int i;
-    if (ENGINE) { bris_render_begin(256); bris_render_voices(0, PART == 2 ? 0 : PART ? 3 : 6, 0); bris_render_end(L, R); }
-    else { one_render_begin(256); one_render_voices(0, PART == 2 ? 0 : PART ? 3 : 6, 0); one_render_end(L, R); }
-    if (RUM & 1) rum_tail(&rum, WL, WR, 256, 256);
-    if (RUM & 2) {
-        pump_gain(&pump, PG, 256);
-        for (i = 0; i < 256; i++) { WL[i] *= PG[i]; WR[i] *= PG[i]; }
-        rum_feed(&rum, L, R, 256);
-        rum_mix(&rum, L, R, WL, WR, 256);
-    }
-    if (TAPE) sliten_process(&tape, L, R, 256);
+    if (SPLIT) { part(48); part(208); } else part(256);
 }
 
 void _start(void)

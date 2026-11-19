@@ -18,6 +18,15 @@ void pump_init(pump_t *p)
 
 float pump_tempo(const pump_t *p) { return p->ext ? p->ext_bpm : p->bpm; }
 
+int pump_clock(const pump_t *p, uint32_t now, float *beats)
+{
+    int32_t el;
+    if (!p->ext || !p->have_beat) return 0;
+    el = (int32_t)(now - p->beat_at);
+    *beats = (float)(p->beat_idx & 15u) + (float)(el > 0 ? el : 0) * (1.f / (float)PUMP_TICKS_HZ) * p->ext_bpm * (1.f / 60.f);
+    return 1;
+}
+
 /* MIDI-klockan: 24 pulser per fjärdedel. Var 24:e är ett slag: tiden mellan två slag ger tempot. */
 void pump_midi(pump_t *p, uint32_t st, uint32_t now)
 {

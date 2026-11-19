@@ -3,7 +3,7 @@
 
 Last: motorerna körs i en RISC-V-emulator (rv32imf) och instruktionerna per 256 sampel räknas med sex röster igång.
 FM-1:ans pi32v2 är en annan men liknande RISC-kärna (fm1-emu räknar med en instruktion per cykel vid 240 MHz), så
-siffran är ett ungefär (den riktiga blir omkring 15 % högre). Den riktiga mätningen görs i fm1-emu när GitHub bygger.
+siffran är ett ungefär (den riktiga har blivit omkring 12 % högre: 38,5 % här mot 42,9 % i fm1-emu för ljud 1 med allt på). Den riktiga mätningen görs i fm1-emu när GitHub bygger.
 
 Minne: modulens alla filer byggs för rv32 och .data + .bss räknas ihop. En modul har 272 KiB (278 528 byte); fm1-dock
 vägrar bygga en som är större. Skriptet slutar med fel om det blir för trångt, så att det syns här och inte först på
@@ -25,10 +25,11 @@ GEM = os.path.join(MOD, "..", "..", "gemensamt")
 DOCK = os.environ.get("FM1_DOCK", os.path.join(MOD, "..", "..", "..", "fm1-dock"))
 BUDGET = 5.8e-3 * 240e6            # ljudavbrottets 5,8 ms per 256 sampel vid 240 MHz
 RAM = 0x44000                      # en moduls minne (fm1-dock: HB_MOD_RAM_SIZE)
-RAM_MARGIN = 512                   # pi32v2-bygget blir några hundra byte större än rv32-bygget
+RAM_MARGIN = 512                   # (JieLis bygge har hittills blivit drygt 1 KB mindre än rv32-bygget: marginalen är extra)
 CF = ["clang", "--target=riscv32", "-march=rv32imf", "-mabi=ilp32f", "-O2", "-ffreestanding", "-fno-builtin",
       "-nostdlib", "-ffp-contract=off", f"-I{SRC}", f"-I{GEM}", f"-I{GEM}/effekter"]
 OBJS = {"one": os.path.join(SRC, "one_fm1.c"), "bris": os.path.join(SRC, "bris_fm1.c"), "bfx": os.path.join(SRC, "bfx_fm1.c"),
+        "spel": os.path.join(SRC, "spel_fm1.c"),
         "sliten": os.path.join(GEM, "effekter", "sliten_fm1.c"), "rum": os.path.join(GEM, "effekter", "rum_fm1.c"),
         "pump": os.path.join(GEM, "effekter", "pump_fm1.c")}
 
@@ -67,11 +68,11 @@ def memory():
     return total
 
 
-def run(syms, engine, preset, tape=0, rum=0, part=0):
+def run(syms, engine, preset, tape=0, rum=0, part=0, split=0):
     mu = Uc(UC_ARCH_RISCV, UC_MODE_RISCV32)
     mu.mem_map(0x10000, 0x100000)
     mu.mem_write(0x10000, open(os.path.join(HERE, "one.bin"), "rb").read())
-    for name, v in (("ENGINE", engine), ("PRESET", preset), ("TAPE", tape), ("RUM", rum), ("PART", part)):
+    for name, v in (("ENGINE", engine), ("PRESET", preset), ("TAPE", tape), ("RUM", rum), ("PART", part), ("SPLIT", split)):
         mu.mem_write(syms[name], struct.pack("<i", v))
     mu.reg_write(UC_RISCV_REG_SP, 0x10000 + 0x100000 - 16)
     mu.reg_write(UC_RISCV_REG_MSTATUS, 0x6000)       # FPU på
@@ -95,7 +96,7 @@ def run(syms, engine, preset, tape=0, rum=0, part=0):
 if __name__ == "__main__":
     syms = build()
     args = sys.argv[1:] or ["1", "26", "28", "b1", "b5", "b38"]
-    worst = 0.0
+    worst = delat = 0.0
     pct = lambda n: n / BUDGET * 100                  # noqa: E731
     for a in args:
         engine, p = (1, int(a[1:])) if a.startswith("b") else (0, int(a))
@@ -111,10 +112,14 @@ if __name__ == "__main__":
         k0_utan = (half - fx) + max(fx, tail) + mix
         k0_med = half + mix + max(tape, tail)
         k1 = (allt - half) + tail                     # kärna 1: röst 3..5 och klangen
+        # ett anrop som ARP eller SEQ delar i två bitar kostar lite mer (allt räknat på en kärna, med och utan delning)
+        delat = max(delat, pct(run(syms, engine, p, 1, 3, 0, 1) - run(syms, engine, p, 1, 3)))
         worst = max(worst, pct(k0_utan), pct(k0_med), pct(k1))
         print(f"{'BRIS ' if engine else '3 OSC'} ljud {p:2d}: motorn ensam {pct(allt):5.1f} %   med reverb och pump: kärna 0 "
               f"{pct(k0_utan):5.1f} %, med TAPE också {pct(k0_med):5.1f} %; kärna 1 {pct(k1):5.1f} %")
-    print(f"högst på en kärna: {worst:.1f} % av ljudavbrottet (fm1-dock:s råd: under 50 %; den riktiga blir omkring 15 % högre)")
+    worst += delat
+    print(f"ett anrop delat av ett steg i ARP eller SEQ: {delat:.1f} % till. Högst på en kärna, med det: {worst:.1f} % av ljudavbrottet "
+          f"(fm1-dock:s råd: under 50 %; den riktiga blir omkring 12 % högre)")
     mem = memory()
     if mem is None:
         print("minne: fm1-dock saknas (FM1_DOCK), räknas inte här")
@@ -122,5 +127,5 @@ if __name__ == "__main__":
         print(f"minne: {mem} av {RAM} byte ({RAM - mem} kvar)")
         if mem > RAM - RAM_MARGIN:
             sys.exit(f"FEL: modulen får inte plats i FM-1:ans minne med marginal ({RAM_MARGIN} byte)")
-    if worst * 1.15 > 50:
+    if worst * 1.12 > 50:
         sys.exit("FEL: lasten på en kärna blir över hälften av ljudavbrottet")

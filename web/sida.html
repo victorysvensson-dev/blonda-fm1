@@ -219,7 +219,16 @@ a { color: var(--orange); }
         <li>ALGORITHM är ERA: från MODERN (rent) via TAPE (kassett som slits) till LOFI (färre bitar). Står uppe till höger på skärmen.</li>
         <li>KNOB1–4 ändrar de fyra värdena på skärmen, SELECT bläddrar sidor.</li>
         <li>SEL filter · EDIT oscillatorer (3 OSC: en sida per oscillator och en mixer) · ENV höljen · LFO · FX · GLO röst. Tryck igen för nästa sida.</li>
-        <li>SAVE sparar ljudet i den här webbläsaren, med ERA, reverb och pump.</li>
+        <li>SAVE sparar ljudet i den här webbläsaren, med ERA, reverb, pump, ARP och sekvensen.</li>
+      </ul>
+    </section>
+    <section>
+      <h2>ARP OCH SEQ</h2>
+      <ul>
+        <li>ARP slår på arpeggiot: tangenterna du håller spelas en i taget, i takt. På sidan: läge (upp, ned, upp och ned, slump, i den ordning du tryckte), takt, oktaver och tonernas längd. Tryck ARP igen för att slå av.</li>
+        <li>REC spelar in en sekvens steg för steg: varje ton eller ackord blir ett steg när du släpper tangenterna, upp till 64 steg. Under inspelningen ger PLAY ett tyst steg och SEQ förlänger förra steget. REC igen: klar.</li>
+        <li>PLAY spelar sekvensen runt. En tangent flyttar den då i tonhöjd, eller spelar ovanpå: välj med SEQ KEYS på SEQ-sidan, där också takten, tonernas längd och TEMPO finns.</li>
+        <li>Kommer MIDI-klocka går ARP och SEQ i takt med den, och MIDI start och stopp spelar och stannar sekvensen.</li>
       </ul>
     </section>
     <section>
@@ -276,7 +285,7 @@ async function makeInstance() {
   const { instance } = await WebAssembly.instantiate(wasmOf(mod), {});
   const e = instance.exports;
   const st = loadStore();
-  if (st && st.length <= 240) { new Uint8Array(e.memory.buffer, e.w_store(), st.length).set(st); e.w_store_set(st.length); }
+  if (st && st.length <= 8418) { new Uint8Array(e.memory.buffer, e.w_store(), st.length).set(st); e.w_store_set(st.length); }
   e.w_init();
   return e;
 }
