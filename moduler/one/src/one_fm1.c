@@ -1,76 +1,19 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* BLONDA ONE för M-VAVE FM-1. Signalvägen följer blonda-motor/generator/one.py rad för rad; skillnaderna
- * är bara hur det räknas (samma sätt som moduler/bris):
+ * är bara hur det räknas (samma sätt som BRIS-motorn, src/bris_fm1.c):
  *   - float i stället för double, egna approximationer i stället för libm (pow, exp, sin, tan, tanh)
  *   - tonhöjd, drift, filterkoefficient och tangeringsfaktorer en gång per block om ONE_K sampel
  *   - koefficienter som bara beror på parametrarna räknas när en parameter ändras, inte i varje sampel
  *   - varje oscillator räknas för sig över blocket med sin vågform; en oscillator på nivå 0 räknas inte alls
- *   - ekobufferten i int16 (Q15) och 1 s lång, ensemblens läsposition interpolerad över blocket
+ *   - ensemble, eko och utgång delas med BRIS-motorn (bfx_fm1.c): ekobufferten i int16 (Q15) och 0,82 s lång
  * Efter rösterna (ensemble, eko, utgång) och röstfördelningen är ONE samma som BRIS, här som i blonda-motor.
  * Allt som påverkar ljudet hör egentligen hemma i generatorn: ändras ONE där, ändra här också och kör
  * test/likhet.py. */
 #include "one_fm1.h"
+#include "bfx_fm1.h"
+#include "motor_matte.h"
 
 #define SR ((float)ONE_SR)
-
-/* ------------------------------------------------------------------ snabb matte (ingen libm) */
-typedef union { float f; uint32_t u; } fbits_t;
-
-static inline int32_t ifloor(float x) { int32_t i = (int32_t)x; return (x < (float)i) ? i - 1 : i; }
-static inline float ffloor(float x) { return (float)ifloor(x); }
-static inline float fclamp(float x, float lo, float hi) { return x < lo ? lo : (x > hi ? hi : x); }
-static inline float fmaxf_(float a, float b) { return a > b ? a : b; }
-static inline float fabsf_(float x) { return x < 0.f ? -x : x; }
-
-/* 2^x: avrundning till närmaste heltal + Taylor av grad 6 på [-0.5, 0.5] (relativt fel ~1e-7) */
-static float exp2_f(float x)
-{
-    int32_t i;
-    float f, p;
-    fbits_t r;
-    if (x < -126.f) return 0.f;
-    if (x > 126.f) x = 126.f;
-    i = ifloor(x + 0.5f);
-    f = (x - (float)i) * 0.69314718f;          /* ln 2 */
-    p = 1.f + f * (1.f + f * (0.5f + f * (0.16666667f + f * (0.041666668f + f * (0.008333334f + f * 0.0013888889f)))));
-    r.u = (uint32_t)(i + 127) << 23;
-    return r.f * p;
-}
-static inline float exp_f(float x) { return exp2_f(x * 1.44269504f); }
-
-/* sin(x) för x i [-pi/2, pi/2]: Taylor av grad 11 (fel ~6e-8) */
-static inline float sin_half(float x)
-{
-    float x2 = x * x;
-    return x * (1.f + x2 * (-0.16666667f + x2 * (0.008333334f + x2 * (-1.984127e-4f + x2 * (2.7557319e-6f + x2 * -2.5052108e-8f)))));
-}
-/* sin(2 pi p) för vilket p som helst */
-static float sin2pi(float p)
-{
-    float f = p - ffloor(p), x;
-    if (f >= 0.5f) f -= 1.f;                   /* [-0.5, 0.5) */
-    x = f * 6.2831853f;                        /* [-pi, pi) */
-    if (x > 1.5707963f) x = 3.1415927f - x;
-    else if (x < -1.5707963f) x = -3.1415927f - x;
-    return sin_half(x);
-}
-/* tan(w) för w i [0, 0.42 pi]: sin / cos med Taylor */
-static float tan_f(float w)
-{
-    float w2 = w * w;
-    float s = sin_half(w);
-    float c = 1.f + w2 * (-0.5f + w2 * (0.041666668f + w2 * (-0.0013888889f + w2 * (2.4801587e-5f + w2 * (-2.7557319e-7f + w2 * 2.0876757e-9f)))));
-    return s / c;
-}
-/* tanh: Padé [7/6], ±1 från |x| = 4.97 där kvoten når 1 */
-static inline float tanh_f(float x)
-{
-    float x2;
-    if (x > 4.97f) return 1.f;
-    if (x < -4.97f) return -1.f;
-    x2 = x * x;
-    return x * (135135.f + x2 * (17325.f + x2 * (378.f + x2))) / (135135.f + x2 * (62370.f + x2 * (3150.f + x2 * 28.f)));
-}
 
 /* ------------------------------------------------------------------ parametrar och koefficienter */
 static float P[OP_N];                           /* parametrarnas värden (som Max-pluggen) */
@@ -96,12 +39,10 @@ static struct {                                 /* räknas i huvudloopen när en
     float og;                                   /* utnivå efter filtret (håller nivån jämn när drv vrids) */
     float kk, comp, cutB, spread, ug, detc;
     float egc, velf, lfocut3, kbd12, mwcut4, vela, lfoamp5;
-    float cdry, cwet, cd;                       /* ensemble */
-    float sdtT, fbk, dmix, gv;                  /* eko och utgång */
 } C;
 
 /* fasta konstanter (beror bara på ONE_SR), räknade i one_init */
-static float lsmc, sdtc, dgc, cbase, chinc[4], drinc[ONE_NV];
+static float lsmc, drinc[ONE_NV];
 
 static const float DET[ONE_NV] = {-1.f, 1.f, -0.6f, 0.6f, -0.2f, 0.2f};
 static const float PANL[ONE_NV] = {0.f, 0.85f, 0.f, 0.5f, 0.f, 0.17f};       /* max(0, pan) */
@@ -167,13 +108,8 @@ static void coeffs(void)
     C.mwcut4 = P[OP_mwcut] * 4.f;
     C.vela = P[OP_vela];
     C.lfoamp5 = P[OP_lfoamp] * 0.5f;
-    C.cdry = 1.f - P[OP_chorus] * 0.35f;
-    C.cwet = P[OP_chorus] * 0.55f;
-    C.cd = (0.7f + P[OP_chorus] * 2.2f) * SR / 1000.f;
-    C.sdtT = 0.001f + P[OP_dtime] * P[OP_dtime] * 0.999f;
-    C.fbk = P[OP_dfb] * 1.02f;
-    C.dmix = P[OP_dmix];
-    C.gv = P[OP_vol] * P[OP_vol] * 1.25f;
+    /* ensemble, eko och utgång ligger i bfx_fm1.c (delas av motorerna) */
+    bfx_set(P[OP_chorus], P[OP_dtime], P[OP_dfb], P[OP_dmix], P[OP_vol]);
 }
 
 /* ------------------------------------------------------------------ ljudets tillstånd */
@@ -188,11 +124,8 @@ typedef struct {
 } voice_t;
 static voice_t V[ONE_NV];
 
-static float lph, lsh, lsm, cp[4], sdt, sdtk, dlpL, dlpR, dcxL, dcyL, dcxR, dcyR, pk;
+static float lph, lsh, lsm;
 static uint32_t rng, lrs;
-static int32_t ci, dw;
-static float chb[2][ONE_CHN];
-static int16_t dlb[2][ONE_DLN];
 
 static float m_env, m_peak, m_lfo;
 static uint32_t m_mask;
@@ -232,18 +165,10 @@ static inline float blamp(float t, float dt, float idt)
     return 0.f;
 }
 
-/* till Q15 mot noll (inte avrundat): annars kan ekot fastna på ±1 steg i stället för att dö ut */
-static inline int16_t q15(float x)
-{
-    x *= 32767.f;
-    if (x > 32767.f) x = 32767.f;
-    if (x < -32767.f) x = -32767.f;
-    return (int16_t)x;
-}
-
 static float frac_f(float x) { return x - ffloor(x); }
 
-void one_reset(void)
+/* rösterna tystas och LFO:n börjar om; ensemble och eko rörs inte (de klingar vidare när modulen byter motor) */
+void one_reset_voices(void)
 {
     int i;
     for (i = 0; i < ONE_NV; i++) {
@@ -259,23 +184,26 @@ void one_reset(void)
         vn[i] = 60.f; vg[i] = 0.f; vt[i] = 0;
     }
     lph = lsh = lsm = 0.f;
-    cp[0] = 0.f; cp[1] = 0.25f; cp[2] = 0.5f; cp[3] = 0.75f;
-    sdt = 0.3f; sdtk = 0.f;
-    dlpL = dlpR = dcxL = dcyL = dcxR = dcyR = pk = 0.f;
     rng = 2463534242u;
     lrs = 20240917u;
-    ci = 0; dw = 0;
-    for (i = 0; i < ONE_CHN; i++) chb[0][i] = chb[1][i] = 0.f;
-    for (i = 0; i < ONE_DLN; i++) dlb[0][i] = dlb[1][i] = 0;
     g_bend = g_mw = g_at = 0.f;
     m_env = m_peak = m_lfo = 0.f; m_mask = 0;
+}
+
+void one_reset(void)
+{
+    one_reset_voices();
+    bfx_reset();
 }
 
 /* ------------------------------------------------------------------ ljud */
 /* Ett anrop delas i tre pass så att rösterna kan räknas på två kärnor: LFO, pulsbredd och brus för hela anropet,
  * rösterna (vilka som helst, i vilken ordning som helst: varje röst har sitt eget tillstånd och skriver till sin
  * egen mix), sedan ensemble, eko och utgång. Blocken om ONE_K räknas från anropets början. */
-static float lfo_all[ONE_MAXN], pwv_all[ONE_MAXN], nz_all[ONE_MAXN], mixL[2][ONE_MAXN], mixR[2][ONE_MAXN];
+#define lfo_all bfx_lfo                         /* arbetsminnet delas med BRIS-motorn (bfx_fm1.h) */
+#define mixL bfx_mixL
+#define mixR bfx_mixR
+static float nz_all[ONE_MAXN];
 static uint32_t call_n;
 static float call_mwat, call_bs, part_me[2];
 static uint32_t part_mask[2];
@@ -283,7 +211,7 @@ static uint32_t part_mask[2];
 void one_render_begin(uint32_t n)
 {
     uint32_t s;
-    float nzc = C.nzc, pwb = C.pwbase, pwm = C.pwmc;
+    float nzc = C.nzc;
     call_n = n > ONE_MAXN ? ONE_MAXN : n;
     call_mwat = g_mw + g_at;
     call_bs = g_bend * C.bendr;
@@ -302,7 +230,6 @@ void one_render_begin(uint32_t n)
         lsm += (raw - lsm) * lsmc;
         lfo_all[s] = lsm;
         nz_all[s] = noise() * nzc;
-        pwv_all[s] = fclamp(pwb + lsm * pwm, 0.02f, 0.98f);
         mixL[0][s] = mixR[0][s] = mixL[1][s] = mixR[1][s] = 0.f;
     }
     part_me[0] = part_me[1] = 0.f;
@@ -310,8 +237,8 @@ void one_render_begin(uint32_t n)
 }
 
 /* En oscillator över ett block: lägger vågen gånger lv till mb[0..n-1] och ger tillbaka den nya fasen.
- * w: 0 triangel, 1 såg, 2 puls (pulsbredden pwv per sampel). dt är fasökningen, samma för hela blocket. */
-static float osc_block(float *mb, uint32_t n, float ph, float dt, int32_t w, float lv, const float *pwv)
+ * w: 0 triangel, 1 såg, 2 puls (pulsbredden följer LFO:n sampel för sampel). dt är fasökningen, samma för hela blocket. */
+static float osc_block(float *mb, uint32_t n, float ph, float dt, int32_t w, float lv, const float *lfo)
 {
     float idt = 1.f / dt;
     uint32_t s;
@@ -323,7 +250,7 @@ static float osc_block(float *mb, uint32_t n, float ph, float dt, int32_t w, flo
     } else if (w == 2) {                        /* puls */
         lv *= ONE_PULS;
         for (s = 0; s < n; s++) {
-            float q, pw = pwv[s];
+            float q, pw = fclamp(C.pwbase + lfo[s] * C.pwmc, 0.02f, 0.98f);
             ph += dt; if (ph >= 1.f) ph -= 1.f;
             q = ph + 1.f - pw; if (q >= 1.f) q -= 1.f;
             mb[s] += ((ph < pw ? 1.f : -1.f) + blep(ph, dt, idt) - blep(q, dt, idt)) * lv;
@@ -340,7 +267,7 @@ static float osc_block(float *mb, uint32_t n, float ph, float dt, int32_t w, flo
     return ph;
 }
 
-static void voices_block(uint32_t first, uint32_t last, const float *lfo, const float *pwv, const float *nz,
+static void voices_block(uint32_t first, uint32_t last, const float *lfo, const float *nz,
                          float *xL, float *xR, uint32_t n, float *mep, uint32_t *maskp)
 {
     float mwat = call_mwat, bs = call_bs, me = *mep;
@@ -428,7 +355,7 @@ static void voices_block(uint32_t first, uint32_t last, const float *lfo, const 
         /* mixern: bruset, sedan varje oscillator som hörs (nivåerna är redan gånger drivningen) */
         for (s = 0; s < act; s++) mb[s] = nz[s];
         for (k = 0; k < 3; k++) {
-            if (C.lv[k] > 0.f) v->ph[k] = osc_block(mb, act, v->ph[k], dt[k], C.w[k], C.lv[k], pwv);
+            if (C.lv[k] > 0.f) v->ph[k] = osc_block(mb, act, v->ph[k], dt[k], C.w[k], C.lv[k], lfo);
             else v->ph[k] = frac_f(v->ph[k] + dt[k] * (float)act);
         }
 
@@ -466,74 +393,7 @@ void one_render_voices(uint32_t first, uint32_t last, uint32_t mix)
     part_me[mix] = 0.f; part_mask[mix] = 0;
     for (off = 0; off < call_n; off += ONE_K) {
         uint32_t k = call_n - off < ONE_K ? call_n - off : ONE_K;
-        voices_block(first, last, lfo_all + off, pwv_all + off, nz_all + off, mixL[mix] + off, mixR[mix] + off, k, &part_me[mix], &part_mask[mix]);
-    }
-}
-
-static void fx_block(float *L, float *R, const float *xL, const float *xR, uint32_t n)
-{
-    float cdry = C.cdry, cwet = C.cwet;
-    uint32_t s, i;
-
-    /* stereoensemble: fyra fördröjningar, två per kanal; läspositionen interpoleras över blocket */
-    {
-        float off0[4], doff[4];
-        static const float dep[4] = {1.f, 0.8f, 1.f, 0.8f};
-        for (i = 0; i < 4; i++) {
-            float a = cp[i] + chinc[i], b;
-            cp[i] = a - ffloor(a);
-            b = cp[i] + chinc[i] * (float)(n - 1);
-            off0[i] = cbase + sin2pi(cp[i]) * C.cd * dep[i];
-            doff[i] = (cbase + sin2pi(b) * C.cd * dep[i] - off0[i]) / (float)(n > 1 ? n - 1 : 1);
-            cp[i] = cp[i] + chinc[i] * (float)(n - 1);
-            cp[i] -= ffloor(cp[i]);
-        }
-        for (s = 0; s < n; s++) {
-            float tp[4], cL, cR, wL, wR, oL, oR, dd, df, rf;
-            int32_t k, di, ri, rj;
-            static const uint8_t ch[4] = {0, 1, 1, 0};
-            ci = (ci + 1) & (ONE_CHN - 1);
-            chb[0][ci] = xL[s];
-            chb[1][ci] = xR[s];
-            for (k = 0; k < 4; k++) {
-                float r = (float)ci - (off0[k] + doff[k] * (float)s);
-                int32_t i0, i1;
-                float f;
-                if (r < 0.f) r += (float)ONE_CHN;
-                i0 = ifloor(r); f = r - (float)i0;
-                i0 &= ONE_CHN - 1; i1 = (i0 + 1) & (ONE_CHN - 1);
-                tp[k] = chb[ch[k]][i0] + (chb[ch[k]][i1] - chb[ch[k]][i0]) * f;
-            }
-            cL = xL[s] * cdry + (tp[0] + tp[1] * 0.6f) * cwet;
-            cR = xR[s] * cdry + (tp[2] + tp[3] * 0.6f) * cwet;
-
-            /* digitalt eko upp till 1 s */
-            {   /* sdt glider mot målet; Kahan-summa så att float inte fastnar strax före (som double inte gör) */
-                float y = ((C.sdtT - sdt) + sdtk) * sdtc - sdtk, tt = sdt + y;
-                sdtk = (tt - sdt) - y;
-                sdt = tt;
-            }
-            if (++dw >= ONE_DLN) dw = 0;
-            dd = fclamp((sdt - sdtk) * SR, 2.f, (float)(ONE_DLN - 10));
-            di = (int32_t)dd; df = dd - (float)di;
-            ri = dw - di; if (df > 0.f) { ri -= 1; rf = 1.f - df; } else rf = 0.f;
-            if (ri < 0) ri += ONE_DLN;
-            rj = ri + 1; if (rj >= ONE_DLN) rj = 0;
-            wL = ((float)dlb[0][ri] + (float)(dlb[0][rj] - dlb[0][ri]) * rf) * (1.f / 32767.f);
-            wR = ((float)dlb[1][ri] + (float)(dlb[1][rj] - dlb[1][ri]) * rf) * (1.f / 32767.f);
-            dlpL += (wL - dlpL) * dgc;
-            dlpR += (wR - dlpR) * dgc;
-            dlb[0][dw] = q15(tanh_f(cL + dlpL * C.fbk));
-            dlb[1][dw] = q15(tanh_f(cR + dlpR * C.fbk));
-            oL = tanh_f((cL + dlpL * C.dmix) * C.gv);
-            oR = tanh_f((cR + dlpR * C.dmix) * C.gv);
-            /* likspänningsfilter */
-            dcyL = oL - dcxL + 0.9995f * dcyL; dcxL = oL;
-            dcyR = oR - dcxR + 0.9995f * dcyR; dcxR = oR;
-            L[s] = dcyL;
-            R[s] = dcyR;
-            pk = fmaxf_(fmaxf_(fabsf_(dcyL), fabsf_(dcyR)), pk * 0.9997f);
-        }
+        voices_block(first, last, lfo_all + off, nz_all + off, mixL[mix] + off, mixR[mix] + off, k, &part_me[mix], &part_mask[mix]);
     }
 }
 
@@ -544,11 +404,11 @@ void one_render_end(float *L, float *R)
     for (s = 0; s < call_n; s++) { mixL[0][s] += mixL[1][s]; mixR[0][s] += mixR[1][s]; }
     for (off = 0; off < call_n; off += ONE_K) {
         uint32_t k = call_n - off < ONE_K ? call_n - off : ONE_K;
-        fx_block(L + off, R + off, mixL[0] + off, mixR[0] + off, k);
+        bfx_block(L + off, R + off, mixL[0] + off, mixR[0] + off, k);
     }
     m_env = fmaxf_(part_me[0], part_me[1]);
     m_mask = part_mask[0] | part_mask[1];
-    m_peak = pk;
+    m_peak = bfx_peak();
     if (call_n) m_lfo = lfo_all[call_n - 1];
 }
 
@@ -682,12 +542,8 @@ void one_load_preset(int index)
 void one_init(void)
 {
     int i;
-    static const float chr[4] = {0.31f, 0.47f, 0.39f, 0.53f};
     lsmc = 1.f - exp_f(-1.f / (SR * 0.0007f));
-    sdtc = 1.f - exp_f(-1.f / (SR * 0.12f));
-    dgc = 1.f - exp_f(-6.2831853f * 6500.f / SR);
-    cbase = 7.f * SR / 1000.f;
-    for (i = 0; i < 4; i++) chinc[i] = chr[i] / SR;
+    bfx_init();
     for (i = 0; i < ONE_NV; i++) drinc[i] = (0.07f + (float)i * 0.023f) / SR * (float)ONE_K;
     mode_ = 0; uni_ = 0; nstack = 0; mono_on = 0; sus_down = 0; clock_ = 0; tc_ = 0;
     for (i = 0; i < ONE_NV; i++) { VS[i].note = -1; VS[i].on = VS[i].sus = 0; VS[i].age = 0; }

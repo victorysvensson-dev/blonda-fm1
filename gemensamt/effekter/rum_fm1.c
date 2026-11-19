@@ -272,7 +272,11 @@ void rum_tail(rum_t *r, float *wetL, float *wetR, uint32_t n, uint32_t min_delay
     }
 }
 
-void rum_resync(rum_t *r) { r->pr = r->pi0; }
+void rum_resync(rum_t *r, uint32_t ahead)
+{
+    r->pr = r->pi0 + (int32_t)ahead;
+    if (r->pr >= RUM_PDN) r->pr -= RUM_PDN;
+}
 
 void rum_feed(rum_t *r, const float *L, const float *R, uint32_t n)
 {

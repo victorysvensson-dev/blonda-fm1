@@ -13,7 +13,7 @@ ha svar, kommentarer och dokumentation på svenska; kodnamn på engelska.
    Ljudavbrottet har 5,8 ms per 256 sampel vid 44,1 kHz: sikta under hälften (fm1-emu-mätningen i CI).
 3. **Ljud från blonda-motor ska låta som i blonda-motor.** En motor som finns där portas hit och testas mot den:
    fabriksljuden (nivå, klang, form) och scenarier sampel för sampel. Parametrar och ljud genereras ur blonda-motor
-   (se `moduler/bris/tools/gen_presets.py`) och ändras aldrig för hand här. Ändras ljudet i blonda-motor: gör samma
+   (se `moduler/one/tools/gen_presets_one.py`) och ändras aldrig för hand här. Ändras ljudet i blonda-motor: gör samma
    ändring här och kör testerna.
 4. **Kolla innan överlämning.** `./kolla.sh` måste vara grönt (alla moduler + webbemulatorn) innan något lämnas
    till Victory att prova.
@@ -22,19 +22,26 @@ ha svar, kommentarer och dokumentation på svenska; kodnamn på engelska.
    takt, finns bara här), `wasm_host.c` (webbemulatorn).
    En modul tar in dem via `sources =` och `includes =` i sin `module.cfg`; byggskripten läser listan därifrån.
 6. **Två kärnor**: tunga motorer delar upp rösterna och räknar en del på kärna 1 med fm1-dock:s `c1_run` / `c1_wait`
-   (se `moduler/bris`), med reserv på kärna 0 när den inte lånas ut. Ett jobb på kärna 1 har 2,8 KiB stack och får
+   (se `moduler/one`), med reserv på kärna 0 när den inte lånas ut. Ett jobb på kärna 1 har 2,8 KiB stack och får
    inte anropa värden. Kärna 0 väntar på jobbet inne i ljudavbrottet: lägg det så att kärna 0 har eget att räkna
-   under tiden (BRIS: klangen i RUM räknas medan kärna 0 gör ensemble och eko).
+   under tiden (ONE: klangen i RUM räknas medan kärna 0 gör ensemble och eko, eller bandet).
 7. **GPL-3.0-only**, som fm1-dock och Felucca.
 8. **Webbemulatorn tar med alla moduler** (`web/bygg.sh` bygger varje mapp i `moduler/`, väljaren överst på sidan).
    En modul med `HB_F_PANEL` (som PULS) får tangenterna och OCT-knapparna som händelser och tangenternas lysdioder
    visas; lägg till modulens namn och rubrik i `INFO` och dess hjälptext (`data-mod`) i `web/sida.html`.
 
+9. **BLONDA ONE har två motorer i en modul** (`moduler/one`): trioscillatormotorn (`src/one_fm1.c`, ONE i
+   blonda-motor) och BRIS (`src/bris_fm1.c`), med gemensam ensemble, eko och utgång (`src/bfx_fm1.c`). Varje ljud
+   hör till en motor; modulen byter motor med ljudet. En ny motor från blonda-motor läggs till på samma sätt
+   (tabellen `ENGINES` och ljudens ordning i `one_module.c`), inte som en egen modul, och testas mot sitt original
+   för sig. Nya ljud läggs sist i sin motor. Minnet är nästan fullt: `test/cykler/kor.py` räknar det och stoppar
+   om modulen inte ryms.
+
 ## Kommandon
 
 ```sh
 ./kolla.sh                         # allt
-sh moduler/bris/kolla.sh           # en modul
+sh moduler/one/kolla.sh            # en modul
 sh web/bygg.sh                     # webbemulatorn -> web/index.html
 python3 web/test_sida.py           # webbemulatorn i Chrome (Playwright)
 ```

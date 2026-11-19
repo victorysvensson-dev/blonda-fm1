@@ -1,4 +1,4 @@
-/* GENERERAD FIL – ändra inte för hand. Källa: blonda-motor/motorer/bris/bris.json (tools/gen_presets.py). */
+/* GENERERAD FIL – ändra inte för hand. Källa: blonda-motor/motorer/bris/bris.json (tools/gen_presets_bris.py). */
 #ifndef BRIS_PRESETS_H
 #define BRIS_PRESETS_H
 #include <stdint.h>

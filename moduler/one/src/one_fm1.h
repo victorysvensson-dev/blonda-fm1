@@ -21,16 +21,15 @@
 #define ONE_K 16                               /* sampel per styrblock */
 #endif
 #define ONE_NV 6
-#define ONE_CHN 4096                           /* ensemblens buffert, som originalet */
-#define ONE_DLN (ONE_SR + 64)                 /* ekot: 1 s (int16, Q15: originalets 52000 float får inte plats) */
 
 void one_init(void);                           /* nollställer allt och laddar init-ljudet */
 void one_reset(void);                          /* tystar och nollställer ljudet, behåller parametrarna */
+void one_reset_voices(void);                    /* bara rösterna och LFO:n; ensemble och eko klingar vidare */
 void one_render(float *L, float *R, uint32_t n);   /* skriver n sampel (n delbart med ONE_K går snabbast) */
 
 /* Samma sak i tre steg, för två kärnor (fm1-dock:s c1_run): begin, sedan rösterna i två delar (den ena på andra
  * kärnan, till mix 1), sedan end. n högst ONE_MAXN. Delarna får inte överlappa. */
-#define ONE_MAXN 256
+#define ONE_MAXN 256                           /* = BFX_MAXN */
 void one_render_begin(uint32_t n);
 void one_render_voices(uint32_t first, uint32_t last, uint32_t mix);
 void one_render_end(float *L, float *R);

@@ -21,7 +21,7 @@ PULS tar hela panelen (fm1-dock:s `HB_F_PANEL`): tangenterna blir steg och truml
 | SELECT | sida: BD … CB, GLOBAL |
 | KNOB1–4 | trumljudets nivå, stämning, längd och karaktär (punch, snärt, klick, spridning, brus, svep, ton). GLOBAL: tempo, swing, drivning, volym |
 | PRESETS | trumset (10 st: init, Klassisk, Hård, Boom bap, Tajt, Elektro, Djup, Industri, Mjuk, Lofi) |
-| ALGORITHM | **ERA**, som i BRIS: 0 MODERN, 1–60 TAPE, 61–100 LOFI (MIDI CC 77) |
+| ALGORITHM | **ERA**, som i ONE: 0 MODERN, 1–60 TAPE, 61–100 LOFI (MIDI CC 77) |
 | OCT− / OCT+ | tempo −1 / +1 BPM |
 | SAVE | sparar allt: trumset och rattar, alla sex mönster, tempo, swing, ERA |
 | HOME (håll) | fm1-dock:s väljare: byt till en annan modul |

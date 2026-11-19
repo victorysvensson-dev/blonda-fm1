@@ -13,7 +13,7 @@ import sys
 import tempfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(ROOT, "moduler", "bris", "test"))
+sys.path.insert(0, os.path.join(ROOT, "moduler", "one", "test", "bris"))
 import likhet as L  # noqa: E402
 
 EXE = os.path.join(ROOT, "build", "rum-test")

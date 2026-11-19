@@ -81,6 +81,8 @@ void rum_process(rum_t *r, float *L, float *R, uint32_t n);
 void rum_tail(rum_t *r, float *wetL, float *wetR, uint32_t n, uint32_t min_delay);
 void rum_mix(rum_t *r, float *L, float *R, const float *wetL, const float *wetR, uint32_t n);
 void rum_feed(rum_t *r, const float *L, const float *R, uint32_t n);
-void rum_resync(rum_t *r);                      /* om ett rum_tail avbröts halvvägs: klangen börjar om från det som matats in */
+/* Om ett rum_tail avbröts halvvägs: klangen fortsätter som om det blivit klart. ahead = så många sampel klang som
+ * då skulle vara räknade utöver det som matats in med rum_feed (blockets längd, när klangen räknas före rum_feed). */
+void rum_resync(rum_t *r, uint32_t ahead);
 
 #endif

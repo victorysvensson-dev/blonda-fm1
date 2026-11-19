@@ -20,19 +20,15 @@
 #define BRIS_K 16                               /* sampel per styrblock */
 #endif
 #define BRIS_NV 6
-#define BRIS_CHN 512                            /* ensemblens buffert: längsta fördröjningen är 7 + 2,9 ms = 437 sampel
-                                                 * (originalets 4096 ger samma ljud, men minnet behövs till reverbet) */
-#define BRIS_DLN 36544                          /* ekot: 0,83 s (int16, Q15). Originalet går till 1 s (dtime över 0,91);
-                                                 * inget fabriksljud går över 0,64 s. Resten av modulens minne (272 KiB)
-                                                 * är reverbet BLONDA RUM, som modulen lägger efter BRIS. */
 
 void bris_init(void);                           /* nollställer allt och laddar init-ljudet */
 void bris_reset(void);                          /* tystar och nollställer ljudet, behåller parametrarna */
+void bris_reset_voices(void);                    /* bara rösterna och LFO:n; ensemble och eko klingar vidare */
 void bris_render(float *L, float *R, uint32_t n);   /* skriver n sampel (n delbart med BRIS_K går snabbast) */
 
 /* Samma sak i tre steg, för två kärnor (fm1-dock:s c1_run): begin, sedan rösterna i två delar (den ena på andra
  * kärnan, till mix 1), sedan end. n högst BRIS_MAXN. Delarna får inte överlappa. */
-#define BRIS_MAXN 256
+#define BRIS_MAXN 256                           /* = BFX_MAXN */
 void bris_render_begin(uint32_t n);
 void bris_render_voices(uint32_t first, uint32_t last, uint32_t mix);
 void bris_render_end(float *L, float *R);
