@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-only
 # Allt som ska vara grönt innan BRIS (moduler/bris) lämnas över: bygger testverktygen på datorn och kör
 #   1. fabriksljuden mot blonda-motor (likhet.py)      2. scenarier mot blonda-motor (scenarier.py)
-#   3. modulen i en låtsas-FM-1 (skärm, knappar, MIDI) 4. lasten på chipet, ungefär (cykler/kor.py)
-# Kräver: blonda-motor (BLONDA_MOTOR, byggd med cmake) och fm1-dock (FM1_DOCK). Steg 4 kräver clang, lld, unicorn.
+#   3. SLITEN (ERA), 4. RUM (reverbet) och PUMP mot blonda-motor
+#   5. modulen i en låtsas-FM-1 (skärm, knappar, MIDI) 6. lasten på chipet, ungefär (cykler/kor.py)
+# Kräver: blonda-motor (BLONDA_MOTOR, byggd med cmake) och fm1-dock (FM1_DOCK). Steg 6 kräver clang, lld, unicorn.
 set -e
 cd "$(dirname "$0")"
 mkdir -p ../../build
@@ -38,10 +39,18 @@ cc $W -I../../gemensamt -I../../gemensamt/effekter -c ../../gemensamt/effekter/s
 c++ -std=c++17 -O2 -I"$BLONDA_MOTOR/include" -I"$BLONDA_MOTOR/motorer" -I../../gemensamt -I../../gemensamt/effekter \
     -o ../../build/sliten-test ../../gemensamt/test/sliten_test.cpp build/sliten_fm1.o
 python3 ../../gemensamt/test/sliten_test.py | tail -1
-echo "== 4. modulen i en låtsas-FM-1"
+echo "== 4. RUM (reverbet) mot blonda-motor, och PUMP"
+cc $W -I../../gemensamt -I../../gemensamt/effekter -c ../../gemensamt/effekter/rum_fm1.c -o build/rum_fm1.o
+c++ -std=c++17 -O2 -I"$BLONDA_MOTOR/include" -I"$BLONDA_MOTOR/motorer" -I../../gemensamt -I../../gemensamt/effekter \
+    -o ../../build/rum-test ../../gemensamt/test/rum_test.cpp build/rum_fm1.o
+python3 ../../gemensamt/test/rum_test.py | tail -1
+cc -std=c99 -O2 -Wall -I../../gemensamt -I../../gemensamt/effekter ../../gemensamt/test/pump_test.c ../../gemensamt/effekter/pump_fm1.c \
+    -o ../../build/pump-test -lm
+../../build/pump-test | tail -1
+echo "== 5. modulen i en låtsas-FM-1"
 build/bris-modul build/skarm/s | tail -1
 if command -v clang >/dev/null && command -v ld.lld >/dev/null && python3 -c "import unicorn" 2>/dev/null; then
-    echo "== 5. last på chipet (uppskattning, utan ERA)"
+    echo "== 6. last på chipet (uppskattning)"
     python3 test/cykler/kor.py 1 5
 fi
 echo "allt grönt"

@@ -4,7 +4,7 @@
  *   - float i stället för double, egna approximationer i stället för libm (pow, exp, sin, tan, tanh)
  *   - tonhöjd, drift, filterkoefficient och tangeringsfaktorer en gång per block om BRIS_K sampel
  *   - koefficienter som bara beror på parametrarna räknas när en parameter ändras, inte i varje sampel
- *   - ekobufferten i int16 (Q15) och 1 s lång, ensemblens läsposition interpolerad över blocket
+ *   - ekobufferten i int16 (Q15) och 0,83 s lång (BRIS_DLN), ensemblens läsposition interpolerad över blocket
  * Allt som påverkar ljudet hör egentligen hemma i generatorn: ändras BRIS där, ändra här också och kör
  * test/likhet.py. */
 #include "bris_fm1.h"
@@ -432,7 +432,7 @@ static void fx_block(float *L, float *R, const float *xL, const float *xR, uint3
             cL = xL[s] * cdry + (tp[0] + tp[1] * 0.6f) * cwet;
             cR = xR[s] * cdry + (tp[2] + tp[3] * 0.6f) * cwet;
 
-            /* digitalt eko upp till 1 s */
+            /* digitalt eko upp till 0,83 s (originalet 1 s: bufferten BRIS_DLN sätter gränsen) */
             {   /* sdt glider mot målet; Kahan-summa så att float inte fastnar strax före (som double inte gör) */
                 float y = ((C.sdtT - sdt) + sdtk) * sdtc - sdtk, tt = sdt + y;
                 sdtk = (tt - sdt) - y;

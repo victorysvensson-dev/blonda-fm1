@@ -25,7 +25,10 @@ def build():
     subprocess.run(CF + ["-c", os.path.join(HERE, "drv.c"), "-o", os.path.join(HERE, "drv.o")], check=True)
     subprocess.run(CF + ["-c", os.path.join(SRC, "bris_fm1.c"), "-o", os.path.join(HERE, "bris.o")], check=True)
     subprocess.run(CF + ["-c", os.path.join(GEM, "effekter", "sliten_fm1.c"), "-o", os.path.join(HERE, "sliten.o")], check=True)
+    subprocess.run(CF + ["-c", os.path.join(GEM, "effekter", "rum_fm1.c"), "-o", os.path.join(HERE, "rum.o")], check=True)
+    subprocess.run(CF + ["-c", os.path.join(GEM, "effekter", "pump_fm1.c"), "-o", os.path.join(HERE, "pump.o")], check=True)
     subprocess.run(["ld.lld", "-T", os.path.join(HERE, "link.ld"), os.path.join(HERE, "drv.o"), os.path.join(HERE, "bris.o"), os.path.join(HERE, "sliten.o"),
+                    os.path.join(HERE, "rum.o"), os.path.join(HERE, "pump.o"),
                     "-o", os.path.join(HERE, "bris.elf")], check=True)
     subprocess.run(["llvm-objcopy", "-O", "binary", os.path.join(HERE, "bris.elf"), os.path.join(HERE, "bris.bin")], check=True)
     syms = {}
@@ -36,12 +39,13 @@ def build():
     return syms
 
 
-def run(syms, preset, tape=0):
+def run(syms, preset, tape=0, rum=0):
     mu = Uc(UC_ARCH_RISCV, UC_MODE_RISCV32)
     mu.mem_map(0x10000, 0x100000)
     mu.mem_write(0x10000, open(os.path.join(HERE, "bris.bin"), "rb").read())
     mu.mem_write(syms["PRESET"], struct.pack("<i", preset))
     mu.mem_write(syms["TAPE"], struct.pack("<i", tape))
+    mu.mem_write(syms["RUM"], struct.pack("<i", rum))
     mu.reg_write(UC_RISCV_REG_SP, 0x10000 + 0x100000 - 16)
     mu.reg_write(UC_RISCV_REG_MSTATUS, 0x6000)       # FPU på
     st = {"stage": 0, "n": 0}
@@ -69,4 +73,9 @@ if __name__ == "__main__":
             n = run(syms, p, tape)
             print(f"ljud {p:2d}{' + TAPE' if tape else '       '}: {n / 1000:7.0f} k instruktioner per 256 sampel = "
                   f"{n / BUDGET * 100:5.1f} % av ljudavbrottet ({n / 256:.0f} per sampel)")
+    # reverbet: klangen räknas på kärna 1 (bredvid röst 3..5), mix och pump på kärna 0
+    p = presets[0]
+    bas, tail, mix = run(syms, p, 1), run(syms, p, 1, 1), run(syms, p, 1, 2)
+    print(f"reverbets klang (kärna 1): {(tail - bas) / BUDGET * 100:4.1f} %   mix och pump (kärna 0): {(mix - bas) / BUDGET * 100:4.1f} %   "
+          f"allt på en kärna med TAPE: {run(syms, p, 1, 3) / BUDGET * 100:4.1f} %")
     print("fm1-dock:s råd: under halva (50 %) ger marginal för USB och tangenterna")
