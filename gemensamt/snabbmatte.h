@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-/* Snabb matte för FM-1:ans chip: bara float, ingen libm. Samma approximationer som i moduler/bris/src/bris_fm1.c
+/* Snabb matte för FM-1:ans chip: bara float, ingen libm. Samma approximationer som i moduler/one/src/motor_matte.h
  * (testade där mot blonda-motor). Allt är static inline så att varje modul får sin egen kopia. */
 #ifndef BLONDA_SNABBMATTE_H
 #define BLONDA_SNABBMATTE_H

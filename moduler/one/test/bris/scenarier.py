@@ -17,7 +17,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import likhet as L  # noqa: E402
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))   # moduler/one
 EXE = os.path.join(ROOT, "build", "bris-scenarier")
 MAX_DIFF, MAX_NIVA, MAX_KLANG = -30.0, 0.25, 0.5
 

@@ -71,7 +71,7 @@ with sync_playwright() as p:
     pg.evaluate("() => { window.__ctx = () => ctx; window.__node = () => node || spn; }")
     lit = pg.evaluate("""() => { const g = document.getElementById('lcd').getContext('2d').getImageData(0,0,240,240).data;
       let y = 0; for (let i = 0; i < g.length; i += 4) if (g[i] > 150 || g[i+1] > 150) y++; return y; }""")
-    check(lit > 2000, f"skärmen visar BRIS innan ljudet startat ({lit} tända punkter)")
+    check(lit > 2000, f"skärmen visar ONE innan ljudet startat ({lit} tända punkter)")
     pg.screenshot(path=os.path.join(OUT, "webb-1-start.png"))
 
     pg.click("#start")
@@ -156,7 +156,7 @@ with sync_playwright() as p:
     check(h2 != h3, "OCT+ syns överst på skärmen")
     # SAVE -> sparas i webbläsaren
     pg.click("text=SAVE"); pg.wait_for_timeout(400)
-    saved = pg.evaluate("() => { try { return !!localStorage.getItem('blonda-fm1-bris'); } catch (_) { return false; } }")
+    saved = pg.evaluate("() => { try { return !!localStorage.getItem('blonda-fm1-one'); } catch (_) { return false; } }")
     check(saved, "SAVE sparar ljudet i webbläsaren")
 
     # PULS: byt modul, trummaskinen spelar med mellanslag, stegen syns på tangenterna och kan ändras
@@ -189,33 +189,53 @@ with sync_playwright() as p:
     pg.click("text=SAVE"); pg.wait_for_timeout(400)
     check(pg.evaluate("() => !!localStorage.getItem('blonda-fm1-puls')"), "SAVE sparar trummaskinen i webbläsaren")
     pg.mouse.move(5, 5)
-    pg.click(".mods button[data-m=bris]")
-    pg.wait_for_timeout(900)
-    check(pg.inner_text("#title").startswith("BRIS") and pg.evaluate("() => [...document.querySelectorAll('.key')].every(k => k.dataset.led === '0')"),
-          "tillbaka till BRIS: inga lysdioder på tangenterna")
-    pg.keyboard.down("KeyA"); pg.wait_for_timeout(300)
-    lvl = pg.evaluate(TAP); pg.keyboard.up("KeyA")
-    check(lvl > 0.05, f"BRIS spelar igen efter bytet ({lvl:.3f})")
-    # ONE: byt modul, skärmen visar namn och version, tre toner hörs, EDIT bläddrar oscillatorsidorna, SAVE sparar
     pg.click(".mods button[data-m=one]")
     pg.wait_for_timeout(900)
     title = pg.inner_text("#title")
-    check(title.startswith("ONE") and "#one" in pg.url, f"modulväljaren byter till ONE ({title.split()[0]}, {pg.url.split('/')[-1]})")
-    check(pg.is_visible(".help[data-mod=one]") and not pg.is_visible(".help[data-mod=bris]"), "ONE har sin egen hjälptext")
+    check(title.startswith("ONE") and "#one" in pg.url and pg.evaluate("() => [...document.querySelectorAll('.key')].every(k => k.dataset.led === '0')"),
+          f"tillbaka till ONE: inga lysdioder på tangenterna ({title.split()[0]}, {pg.url.split('/')[-1]})")
+    check(pg.is_visible(".help[data-mod=one]") and not pg.is_visible(".help[data-mod=puls]"), "ONE har sin egen hjälptext")
+    pg.keyboard.down("KeyA"); pg.wait_for_timeout(300)
+    lvl = pg.evaluate(TAP); pg.keyboard.up("KeyA")
+    check(lvl > 0.05, f"ONE spelar igen efter bytet ({lvl:.3f})")
+    # Två motorer i en synth. Ljudet som sparades (002, moogbas) hör till 3 OSC: motorn och versionen står överst,
+    # tre toner hörs, EDIT bläddrar fyra oscillatorsidor. Tre steg bakåt på PRESETS ger 139, BRIS-motorns init:
+    # raden överst byts, det låter, och EDIT har en enda sida.
     lcd = lambda: pg.evaluate("() => { const g = document.getElementById('lcd').getContext('2d').getImageData(0,76,240,164).data; let h=0; for (const v of g) h=(h*31+v)|0; return h; }")
+    head = lambda: pg.evaluate("() => { const g = document.getElementById('lcd').getContext('2d').getImageData(0,26,160,18).data; let h=0; for (const v of g) h=(h*31+v)|0; return h; }")
     ink = pg.evaluate("() => { const g = document.getElementById('lcd').getContext('2d').getImageData(40,26,120,18).data; let n=0; for (let i=0;i<g.length;i+=4) if (g[i]+g[i+1]+g[i+2] > 120) n++; return n; }")
-    check(ink > 80, f"ONE: namn och version står överst på skärmen ({ink} tända punkter)")
+    check(ink > 80, f"ONE: motor och version står överst på skärmen ({ink} tända punkter)")
+    pg.wait_for_timeout(1500)                    # den förra tonen och bandet klingar ut
     q0 = pg.evaluate(TAP)
     for k in ("KeyA", "KeyD", "KeyG"): pg.keyboard.down(k)
     pg.wait_for_timeout(350)
     lvl = pg.evaluate(TAP)
     for k in ("KeyA", "KeyD", "KeyG"): pg.keyboard.up(k)
-    check(lvl > 0.05 and q0 < 0.02, f"ONE spelar ett ackord (tyst {q0:.3f}, spelar {lvl:.3f})")
+    check(lvl > 0.05 and q0 < 0.03, f"3 OSC spelar ett ackord (tyst {q0:.3f}, spelar {lvl:.3f})")
     sidor = {lcd()}
     for _ in range(4):
         pg.click("text=EDIT"); pg.wait_for_timeout(250); sidor.add(lcd())
-    check(len(sidor) == 5, f"EDIT bläddrar OSC 1, OSC 2, OSC 3 och MIX ({len(sidor) - 1} olika sidor)")
+    check(len(sidor) == 5, f"3 OSC: EDIT bläddrar OSC 1, OSC 2, OSC 3 och MIX ({len(sidor) - 1} olika sidor)")
     pg.screenshot(path=os.path.join(OUT, "webb-7-one.png"))
+    h3o = head()
+    pg.mouse.move(kp["x"] + 29, kp["y"] + 29)
+    for _ in range(3):
+        pg.mouse.wheel(0, 100); pg.wait_for_timeout(150)
+    pg.wait_for_timeout(250)
+    check(head() != h3o, "PRESETS bakåt förbi 000: raden överst byts (139, BRIS-motorn)")
+    pg.mouse.move(5, 5)
+    pg.keyboard.down("KeyA"); pg.wait_for_timeout(300)
+    lvl = pg.evaluate(TAP); pg.keyboard.up("KeyA")
+    check(lvl > 0.05, f"BRIS-motorn spelar efter motorbytet ({lvl:.3f})")
+    # (sidans namn och de fyra raderna, utan rösternas rutor som slocknar medan tonen klingar ut)
+    sida = lambda: pg.evaluate("() => { const c = document.getElementById('lcd').getContext('2d'); let h=0; for (const [x,y,w,hh] of [[0,80,160,18],[0,100,240,140]]) for (const v of c.getImageData(x,y,w,hh).data) h=(h*31+v)|0; return h; }")
+    pg.click("text=EDIT"); pg.wait_for_timeout(250); e1 = sida()
+    pg.click("text=EDIT"); pg.wait_for_timeout(250)
+    check(sida() == e1, "BRIS-motorn: EDIT har en enda sida (OSC)")
+    pg.click("text=GLO"); pg.wait_for_timeout(250); g1 = sida()
+    pg.click("text=GLO"); pg.wait_for_timeout(250)
+    check(g1 != e1 and sida() != g1, "BRIS-motorn: GLO har två sidor (VOICE, PLAY)")
+    pg.screenshot(path=os.path.join(OUT, "webb-8-one-bris.png"))
     pg.click("text=SAVE"); pg.wait_for_timeout(400)
     check(pg.evaluate("() => !!localStorage.getItem('blonda-fm1-one')"), "SAVE sparar ONE i webbläsaren")
     pg.mouse.move(5, 5)

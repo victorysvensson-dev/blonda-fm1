@@ -129,8 +129,8 @@ jobs:
           cd "$GITHUB_WORKSPACE/sida"
           cat > index.html <<'HTML'
           <!doctype html><meta charset="utf-8"><title>BLONDA FM-1</title>
-          <meta http-equiv="refresh" content="0; url=fm1-emu/?fw=fm1dock&flash=bris.flash&script=bris.txt">
-          <p><a href="fm1-emu/?fw=fm1dock&flash=bris.flash&script=bris.txt">BRIS på FM-1 (fm1-emu)</a></p>
+          <meta http-equiv="refresh" content="0; url=fm1-emu/?fw=fm1dock&flash=one.flash&script=one.txt">
+          <p><a href="fm1-emu/?fw=fm1dock&flash=one.flash&script=one.txt">BLONDA ONE på FM-1 (fm1-emu)</a></p>
           HTML
           ls -la "$GITHUB_WORKSPACE/sida" "$GITHUB_WORKSPACE/sida/fm1-emu" | head -40
 
@@ -164,7 +164,7 @@ jobs:
           gh release create "$GITHUB_REF_NAME" ut/*.dock ut/emulator.html --repo "$GITHUB_REPOSITORY" \
             --title "BLONDA FM-1 $GITHUB_REF_NAME" --notes "BLONDAs moduler för M-VAVE FM-1 (fm1-dock). Webbemulatorn finns i emulator.html."
 
-  # GitHub Pages: fm1-emu med BRIS på https://victorysvensson-dev.github.io/blonda-fm1/
+  # GitHub Pages: fm1-emu med BLONDA ONE på https://victorysvensson-dev.github.io/blonda-fm1/
   # (kräver att Pages är påslaget med källan "GitHub Actions" i repots inställningar)
   sida:
     needs: bygg

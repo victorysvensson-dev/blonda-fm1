@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Kör scenariotestet (build/bris-scenarier) och bedömer varje scenario.
+"""Kör scenariotestet (build/puls-scenarier) och bedömer varje scenario.
 
 Ett scenario är godkänt när antingen
   - differensen sampel för sampel ligger minst 30 dB under signalen, eller

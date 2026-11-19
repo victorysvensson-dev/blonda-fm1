@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Provar Pages-sidan (fm1-emu med fm1-dock och BRIS) i Chrome innan den publiceras: startar en lokal server för
-sida/, öppnar try-outen, väntar tills BRIS har startat och tar en skärmbild. Skärmbilden skrivs till loggen som
+"""Provar Pages-sidan (fm1-emu med fm1-dock och BLONDA ONE) i Chrome innan den publiceras: startar en lokal server för
+sida/, öppnar try-outen, väntar tills ONE har startat och tar en skärmbild. Skärmbilden skrivs till loggen som
 base64 i bitar (rader som börjar med "BILD") och ut/sida.jpg.
   python3 web/prova_fm1emu.py SIDA_MAPP UT_MAPP
 """
@@ -36,7 +36,7 @@ with sync_playwright() as p:
                 break
         except Exception:
             pass
-    pg.wait_for_timeout(15000)                   # fm1-dock startar, BRIS väljs (SELECT vid 1,5 s emulerad tid)
+    pg.wait_for_timeout(15000)                   # fm1-dock startar, ONE väljs (SELECT vid 1,5 s emulerad tid)
     png = os.path.join(ut, "sida.jpg")
     pg.screenshot(path=png, type="jpeg", quality=70)
     print("text på sidan:", " ".join(pg.inner_text("body").split())[:400])

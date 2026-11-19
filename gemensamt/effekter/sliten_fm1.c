@@ -2,7 +2,7 @@
 /* BLONDA SLITEN för FM-1 – rad för rad efter blonda-motor/motorer/sliten/sliten_gen.h (samma GenExpr som
  * Max for Live-pluggen), med samma ordning på brusanropen så att jämförelsen sampel för sampel håller.
  * Skillnader: float, egna approximationer, koefficienter som bara beror på parametrarna räknas när de ändras och
- * filterkoefficienterna en gång per block. Testas mot blonda-motor i moduler/bris/test/sliten_test.cpp. */
+ * filterkoefficienterna en gång per block. Testas mot blonda-motor i gemensamt/test/sliten_test.cpp. */
 #include "sliten_fm1.h"
 #include "snabbmatte.h"
 

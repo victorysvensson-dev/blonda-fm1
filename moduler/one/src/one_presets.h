@@ -1,4 +1,4 @@
-/* GENERERAD FIL – ändra inte för hand. Källa: blonda-motor/motorer/one/one.json (tools/gen_presets.py). */
+/* GENERERAD FIL – ändra inte för hand. Källa: blonda-motor/motorer/one/one.json (tools/gen_presets_one.py). */
 #ifndef ONE_PRESETS_H
 #define ONE_PRESETS_H
 #include <stdint.h>

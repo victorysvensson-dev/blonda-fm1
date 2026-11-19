@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
 /* Webbemulatorns FM-1: fm1-dock:s hb_host_t i WebAssembly, med fm1-dock:s eget typsnitt (gfx.c).
- * En modul ur moduler/ (till exempel moduler/bris eller moduler/puls) länkas in och körs oförändrad, som på FM-1:
+ * En modul ur moduler/ (till exempel moduler/one eller moduler/puls) länkas in och körs oförändrad, som på FM-1:
  * samma init, note, ui, render och draw, och hela panelen som händelser för en modul med HB_F_PANEL.
  * JavaScript-sidan anropar w_*-funktionerna nedan.
  *   web/bygg.sh  ->  web/<modul>.wasm */

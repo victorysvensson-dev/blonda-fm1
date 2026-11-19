@@ -75,12 +75,12 @@ typedef struct {
     uint16_t acc[NPAT];
 } settings_t;
 
-/* skärmens färger: som BRIS (varmt elfenben, orange och petrol på svart) */
+/* skärmens färger: som ONE (varmt elfenben, orange och petrol på svart) */
 static const uint16_t C_NAME = HB_RGB(236, 230, 214), C_VAL = HB_RGB(242, 106, 44), C_LBL = HB_RGB(158, 150, 132),
                       C_HEAD = HB_RGB(52, 150, 144), C_TRACK = HB_RGB(56, 40, 30), C_RULE = HB_RGB(78, 70, 58),
                       C_DIM = HB_RGB(156, 92, 54), C_BEAT = HB_RGB(70, 52, 40), C_BLACK = 0;
 
-/* ------------------------------------------------------------------ ERA: band och lofi (som BRIS) */
+/* ------------------------------------------------------------------ ERA: band och lofi (som ONE) */
 static sliten_t tape;
 static volatile int32_t era;
 static int tape_on;
