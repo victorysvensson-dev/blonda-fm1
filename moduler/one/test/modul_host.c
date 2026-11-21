@@ -16,11 +16,16 @@
 #include "blonda_dot.h"
 
 #include "ljud.h"
-#define BRUS_MAX (-62.0)        /* dBFS RMS, TAPE 60 utan toner */
-#define NPRESETS NLJUD                          /* 160: 3 OSC 0-49, BRIS 1-89, BRIS init, 3 OSC 50-69 (src/ljud.h) */
-#define BRIS0 49                                /* BRIS-ljud nr i (1..89) har nummer BRIS0 + i */
-#define BRIS_INIT 139
-#define NEW0 90                                 /* 3 OSC-ljud nr j (50..) har nummer NEW0 + j */
+#define NPRESETS NLJUD                          /* 162: 3 OSC 0-49, BRIS 1-89 (utan åtta), BRIS init, 3 OSC 50-79 (src/ljud.h) */
+static int ljud_nr(int eng, int idx)            /* numret i listan för ljud nr idx i motorn */
+{
+    int k;
+    for (k = 0; k < NLJUD; k++) if (LJUD[k].eng == eng && LJUD[k].idx == idx) return k;
+    fprintf(stderr, "ljud %d i motor %d finns inte i listan\n", idx, eng); exit(2);
+}
+#define NR_BRIS(i) ljud_nr(ENG_BRIS, (i))
+#define NR_ONE(j) ljud_nr(ENG_ONE, (j))
+#define BRIS_INIT NR_BRIS(0)
 #define NPMAX ((int)OP_N > (int)BP_N ? (int)OP_N : (int)BP_N)
 #define NX 24                                   /* modulens egna parametrar i det sparade: reverb 12, pump 4, ARP 4, SEQ 3, tryck 1 */
 #define SET_N (8 + NPMAX * 4 + 4 + NX + 4)      /* det sparade: 232 byte */
@@ -132,6 +137,7 @@ static void shot(const char *base, int n)
 static int16_t *wav;
 static int wav_n, wav_cap, clipped;
 static int32_t peak;
+static double energy; static long nenergy;
 static void audio(int ms)
 {
     int blocks = ms * 44100 / 1000 / 256, b, i;
@@ -143,6 +149,7 @@ static void audio(int ms)
             if (v > 32767 || v < -32767) clipped++;
             if (v > peak) peak = v;
             if (-v > peak) peak = -v;
+            energy += (double)v * v; nenergy++;
             if (wav_n >= wav_cap) { wav_cap = wav_cap ? wav_cap * 2 : 1 << 20; wav = realloc(wav, (size_t)wav_cap * 2); }
             wav[wav_n++] = (int16_t)(v > 32767 ? 32767 : v < -32767 ? -32767 : v);
         }
@@ -235,9 +242,18 @@ int main(int argc, char **argv)
     palette_set(0);
     CHECK(M->abi == HB_ABI && !strcmp(M->name, "ONE"), "beskrivningen: ABI och namn");
     CHECK(M->init(&HOST) == 0, "init");
+    {   /* tangenterna glöder (syns i mörkret); värden tänder den man håller. release släcker dem åt nästa modul */
+        uint32_t k, glow = 0;
+        for (k = 0; k < 27u; k++) glow += leds[HB_LED_KEY(k)] == 2u;
+        CHECK(glow == 27u, "tangenternas lysdioder glöder från start");
+        M->release();
+        for (k = 0, glow = 0; k < 27u; k++) glow += leds[HB_LED_KEY(k)] != 0u;
+        CHECK(glow == 0u, "release: tangenternas lysdioder släcks");
+        M->init(&HOST);
+    }
     M->draw(1);
     shot(base, n++);                            /* 00: start, one (3 OSC) */
-    CHECK(drawn("001") && drawn("3 OSC V2.4"), "start: ljud 001 med trioscillatormotorn, versionen visas");
+    CHECK(drawn("001") && drawn("3 OSC V2.5"), "start: ljud 001 med trioscillatormotorn, versionen visas");
     CHECK(name_shows("one") && !name_shows("ono") && !name_shows("on"), "namnet står i prickdisplayen, prick för prick (ONE)");
 
     M->note(0, 60, 100); M->note(0, 64, 90); M->note(0, 67, 80);
@@ -281,10 +297,10 @@ int main(int argc, char **argv)
     CHECK(name_shows("moogbas*"), "ändrat ljud: stjärnan i prickdisplayen (MOOGBAS*)");
 
     /* ---- BRIS-motorns sidor, och reverbets och pumpens */
-    prog(BRIS0 + 5);                            /* Unison Bass */
+    prog(NR_BRIS(5));                            /* Unison Bass */
     M->draw(0);
     shot(base, n++);                            /* 15 */
-    CHECK(drawn("054") && drawn("BRIS V2.4"), "ljud 054 hör till BRIS-motorn");
+    CHECK(drawn("054") && drawn("BRIS V2.5"), "ljud 054 hör till BRIS-motorn");
     CHECK(drawn("VOICE  1/3"), "motorbyte: samma knapp, BRIS-motorns sidor (VOICE 1/3)");
     CHECK(name_shows("Unison Bass"), "elva tecken: mindre prickar, en rad (UNISON BASS)");
     btn(HB_BTN_SEL); enc(HB_ENC_KNOB1, -20); enc(HB_ENC_KNOB2, 30);
@@ -299,8 +315,8 @@ int main(int argc, char **argv)
     enc(HB_ENC_KNOB4, -1);
     btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 22: RUM TONE */
     prog(40);                                        /* ekopluck (3 OSC): sidan ligger kvar, reverbet också */
-    CHECK(drawn("RUM TONE  3/5") && drawn("3 OSC V2.4"), "motorbyte: reverbets sida ligger kvar");
-    prog(BRIS0 + 5);
+    CHECK(drawn("RUM TONE  3/5") && drawn("3 OSC V2.5"), "motorbyte: reverbets sida ligger kvar");
+    prog(NR_BRIS(5));
     CHECK(drawn("RUM TONE  3/5"), "och tillbaka");
     btn(HB_BTN_FX); M->draw(0); shot(base, n++);    /* 23: RUM SPACE */
     btn(HB_BTN_FX); enc(HB_ENC_KNOB1, 60); enc(HB_ENC_KNOB2, 1); enc(HB_ENC_KNOB3, 1); enc(HB_ENC_KNOB4, 4); M->draw(0); shot(base, n++);   /* 24: PUMP */
@@ -313,38 +329,42 @@ int main(int argc, char **argv)
     CHECK(leds[HB_BTN_EDIT] == 1u && leds[HB_BTN_SEL] == 2u, "lysdioderna visar sidan");
     prog(2); btn(HB_BTN_EDIT); btn(HB_BTN_EDIT);     /* moogbas: OSC 3 */
     CHECK(drawn("OSC 3  3/4"), "3 OSC: fyra sidor på EDIT");
-    prog(BRIS0 + 5);
+    prog(NR_BRIS(5));
     CHECK(drawn("OSC") && leds[HB_BTN_EDIT] == 1u, "motorbyte från OSC 3: BRIS enda OSC-sida");
 
     /* Samma sidnummer i båda motorerna (FILTER är sida 0) men olika innehåll: allt ritas om vid motorbytet, också
      * när bara det som ändrats ritas. 3 OSC har två sidor på SEL och DRIVE på fjärde raden, BRIS en sida och tangentföljning. */
     prog(2); btn(HB_BTN_SEL); btn(HB_BTN_SEL); btn(HB_BTN_SEL);
     CHECK(drawn("FILTER  1/2") && drawn("Drive"), "3 OSC: FILTER 1/2 med DRIVE");
-    prog(BRIS0 + 5);
+    prog(NR_BRIS(5));
     CHECK(redrawn("FILTER"), "motorbyte på samma sidnummer: sidans namn ritas om (FILTER, en sida)");
-    prog(2); M->draw(0); prog(BRIS0 + 5);
+    prog(2); M->draw(0); prog(NR_BRIS(5));
     CHECK(redrawn("Filter Key Track"), "motorbyte på samma sidnummer: raderna ritas om");
     prog(2);
     CHECK(redrawn("FILTER  1/2") , "och tillbaka: FILTER 1/2");
 
-    /* PRESETS-ratten går runt alla 160, och banken (CC 0) når ljuden över 127 */
+    /* PRESETS-ratten går runt alla 162, och banken (CC 0) når ljuden över 127 */
+    CHECK(NPRESETS == 162 && BRIS_INIT == 131 && NR_ONE(50) == 132, "162 ljud: BRIS init 131, de nya 3 OSC-ljuden från 132");
     prog(0); enc(HB_ENC_PRESETS, -1);
-    CHECK(drawn("159") && drawn("3 OSC V2.4") && name_shows("attabit"), "PRESETS bakåt från 000: 159, sista 3 OSC-ljudet");
+    CHECK(drawn("161") && drawn("3 OSC V2.5") && name_shows("fanfar"), "PRESETS bakåt från 000: 161, sista 3 OSC-ljudet");
     prog(BRIS_INIT);
-    CHECK(drawn("139") && drawn("BRIS V2.4") && name_shows("init"), "ljud 139: BRIS init");
+    CHECK(drawn("131") && drawn("BRIS V2.5") && name_shows("init bris"), "ljud 131: BRIS init (init bris)");
     enc(HB_ENC_PRESETS, 1);
-    CHECK(drawn("140") && drawn("3 OSC V2.4") && name_shows("hoppbrass"), "ljud 140: de nya 3 OSC-ljuden börjar");
+    CHECK(drawn("132") && drawn("3 OSC V2.5") && name_shows("hoppbrass"), "ljud 132: de nya 3 OSC-ljuden börjar");
+    prog(NR_ONE(69));                                    /* åttabit: å ä ö är egna tecken i prickdisplayen */
+    CHECK(dot_glyph('\001') && dot_glyph('\002') && dot_glyph('\003') && name_shows("\001ttabit") && !name_shows("attabit"),
+          "å ä ö i namnen (åttabit, inte attabit)");
     prog(NPRESETS - 1);
     enc(HB_ENC_PRESETS, 1);
-    CHECK(drawn("000") && drawn("3 OSC V2.4"), "och framåt: 000 igen");
+    CHECK(drawn("000") && drawn("3 OSC V2.5"), "och framåt: 000 igen");
     M->midi(0xB0, 0, 1); M->midi(0xC0, 10, 0);
     CHECK(drawn("138"), "MIDI: bank 1, program 10 = ljud 138");
-    M->midi(0xC0, 31, 0);
-    CHECK(drawn("159"), "MIDI: bank 1, program 31 = ljud 159, det sista");
-    M->midi(0xC0, 32, 0);
-    CHECK(drawn("159"), "MIDI: ett nummer över det sista ljudet gör ingenting");
+    M->midi(0xC0, 33, 0);
+    CHECK(drawn("161"), "MIDI: bank 1, program 33 = ljud 161, det sista");
+    M->midi(0xC0, 34, 0);
+    CHECK(drawn("161"), "MIDI: ett nummer över det sista ljudet gör ingenting");
     M->midi(0xB0, 0, 0); M->midi(0xC0, 49, 0);
-    CHECK(drawn("049") && drawn("3 OSC V2.4"), "MIDI: bank 0, program 49 = sista ljudet i trioscillatormotorn");
+    CHECK(drawn("049") && drawn("3 OSC V2.5"), "MIDI: bank 0, program 49 = sista ljudet i trioscillatormotorn");
     M->midi(0xC0, 50, 0);
     {   /* de längsta namnen: två rader */
         int p, two = 0, bad = 0;
@@ -356,10 +376,10 @@ int main(int argc, char **argv)
             if (s2) two++;
             if (!name_shows(nm)) { printf("  namnet syns inte rätt: %d %s\n", p, nm); bad++; }
         }
-        CHECK(bad == 0 && two >= 2, "alla 160 namn står rätt i prickdisplayen, de längsta på två rader");
+        CHECK(bad == 0 && two >= 2, "alla 162 namn står rätt i prickdisplayen, de längsta på två rader");
         prog(50);
     }
-    CHECK(drawn("050") && drawn("BRIS V2.4") && name_shows("Poly Magic"), "MIDI: program 50 = BRIS första ljud");
+    CHECK(drawn("050") && drawn("BRIS V2.5") && name_shows("Poly Magic"), "MIDI: program 50 = BRIS första ljud");
 
     for (i = 0; i < 200; i++) enc(HB_ENC_PRESETS, 1);   /* runt och runt */
     for (i = 0; i < 200; i++) enc(HB_ENC_KNOB1 + (i & 3u), (int32_t)(i % 7u) - 3);
@@ -374,13 +394,15 @@ int main(int argc, char **argv)
             prog(p);
             peak = 0;
             M->note(0, 48, 110); M->note(0, 60, 100); M->note(0, 67, 100);
+            energy = 0; nenergy = 0;
             audio(300);
+            if (getenv("NIVA")) printf("NIVA %d %s %.1f %.1f\n", p, LJUD[p].eng == ENG_ONE ? ONE_PRESETS[LJUD[p].idx].name : BRIS_PRESETS[LJUD[p].idx].name, 10 * log10(energy / nenergy / (32767.0 * 32767.0) + 1e-30), 20 * log10(peak / 32767.0 + 1e-30));
             M->note(0, 48, 0); M->note(0, 60, 0); M->note(0, 67, 0);
             if (peak < 300) { printf("  tyst: ljud %d\n", p); silent++; }
             M->midi(0xB0, 123, 0);
             audio(30);
         }
-        CHECK(NPRESETS == 160 && silent == 0, "alla 160 ljud hörs");
+        CHECK(NPRESETS == 162 && silent == 0, "alla 162 ljud hörs");
         CHECK(clipped == clip0, "inget ljud går över full nivå");
     }
 
@@ -388,7 +410,7 @@ int main(int argc, char **argv)
     {
         int e;
         for (e = 0; e < 2; e++) {
-            prog(e ? BRIS0 + 64 : 22);          /* sträv lead (3 OSC), MPE Lead (BRIS) */
+            prog(e ? NR_BRIS(64) : 22);          /* sträv lead (3 OSC), MPE Lead (BRIS) */
             M->midi(0x90, 62, 100); M->midi(0xE0, 0, 127); M->midi(0xB0, 1, 127); M->midi(0xD0, 100, 0); audio(400);
             M->midi(0xE0, 0, 0); M->midi(0xB0, 64, 127); M->midi(0x80, 62, 0); audio(300);
             M->midi(0xB0, 64, 0); M->midi(0xE0, 0, 64); M->midi(0xB0, 1, 0); M->midi(0xD0, 0, 0); audio(1500);
@@ -434,7 +456,7 @@ int main(int argc, char **argv)
         prog(40);                               /* ekopluck (3 OSC) */
         M->midi(0xB0, 91, 80);
         M->note(0, 60, 120); blocks_peak(30); M->note(0, 60, 0);
-        prog(BRIS0 + 7);                        /* Ensemble (BRIS) */
+        prog(NR_BRIS(7));                        /* Ensemble (BRIS) */
         blocks_peak(10);
         t0 = blocks_peak(60);                   /* 60-400 ms efter bytet */
         blocks_peak(6000);
@@ -448,9 +470,9 @@ int main(int argc, char **argv)
         double e = 0, d01 = 0, d02 = 0;
         for (pass = 0; pass < 3; pass++) {
             M->release(); M->init(&HOST);
-            if (pass == 0) prog(BRIS0 + 64);
+            if (pass == 0) prog(NR_BRIS(64));
             if (pass < 2) { M->midi(0xE0, 0, 127); M->midi(0xB0, 1, 127); }
-            if (pass > 0) prog(BRIS0 + 64);
+            if (pass > 0) prog(NR_BRIS(64));
             M->note(0, 62, 100);
             for (b = 0; b < 40; b++) { memset(keep[pass] + b * 512, 0, 512 * 4); M->render(keep[pass] + b * 512, 256); }
         }
@@ -465,13 +487,13 @@ int main(int argc, char **argv)
     M->release(); M->init(&HOST);
 
     /* ERA (ALGORITHM): MODERN -> TAPE -> LOFI ändrar ljudet, hörs, klipper inte, och 0 är helt rent igen
-     * (efter en stund utan toner: BRIS ensam blir helt tyst, med bandet kvar hörs brus) */
+     * (efter en stund utan toner: helt tyst, också med bandet: det brusar inte) */
     {
         static int32_t keep[3][256 * 2 * 40];
         int32_t pk[3], quiet[3], i2, clip0 = clipped;
         const int32_t steg[3] = {-100, 35, 50};      /* MODERN, TAPE 35, LOFI 85 */
         int k, b;
-        prog(BRIS0 + 1);                             /* Poly Magic */
+        prog(NR_BRIS(1));                             /* Poly Magic */
         for (k = 0; k < 3; k++) {
             int32_t out[512];
             enc(HB_ENC_ALGORITHM, steg[k]);
@@ -502,9 +524,9 @@ int main(int argc, char **argv)
                    pk[0], pk[1], pk[2], 10 * log10(d1 / e0 + 1e-30), 10 * log10(d2 / e0 + 1e-30), quiet[0], quiet[1], quiet[2]);
             CHECK(10 * log10(d1 / e0 + 1e-30) > -20 && 10 * log10(d2 / e0 + 1e-30) > -20, "ERA: TAPE och LOFI låter annorlunda än rent");
             CHECK(pk[1] > 1000 && pk[2] > 1000 && clipped == clip0, "ERA: hörs och klipper inte");
-            CHECK(quiet[1] > 0, "ERA TAPE: bandbruset hörs i tystnaden");
+            CHECK(quiet[1] == 0, "ERA TAPE: inget brus i tystnaden");
         }
-        {   /* bandbruset i tystnaden (ingen ton): hörs som band, men lågt, så att ONE inte står och brusar högt */
+        {   /* bandet i tystnaden (ingen ton): inget brus, på någon nivå */
             const int32_t nivå[3] = {10, 30, 60};
             double db[3];
             int j;
@@ -516,7 +538,7 @@ int main(int argc, char **argv)
                 db[j] = 10 * log10(e / (200.0 * 512) / (32767.0 * 32767.0) + 1e-30);
             }
             printf("  bandbrus i tystnaden (RMS): TAPE 10 %.1f dBFS, TAPE 30 %.1f dBFS, TAPE 60 %.1f dBFS\n", db[0], db[1], db[2]);
-            CHECK(db[0] > -110 && db[2] < BRUS_MAX, "ERA TAPE: bandbruset hörs men är lågt");
+            CHECK(db[0] < -200 && db[1] < -200 && db[2] < -200, "ERA TAPE 10, 30, 60: helt tyst utan toner");
         }
         {   /* tillbaka till 0: bandet tonar ut och slutar räknas, tyst som BRIS ensam */
             int32_t out[512], q = 0;
@@ -534,7 +556,7 @@ int main(int argc, char **argv)
         int pass, b, i2, e2;
         for (pass = 0; pass < 2; pass++) {
             M->release(); M->init(&HOST);
-            prog(BRIS0 + 5);                             /* Unison Bass: kort, torrt ljud utan eko */
+            prog(NR_BRIS(5));                             /* Unison Bass: kort, torrt ljud utan eko */
             M->midi(0xB0, 91, pass ? 64 : 0);           /* reverbets mix: av, sedan halv */
             M->note(0, 48, 110);
             for (b = 0; b < 40; b++) { memset(out, 0, sizeof out); M->render(out, 256); }
@@ -549,7 +571,7 @@ int main(int argc, char **argv)
                 M->midi(0xB0, 91, 127);                  /* bara klang, sex toner hårt, i båda motorerna */
                 for (e2 = 0; e2 < 2; e2++) {
                     int32_t pk = 0;
-                    prog(e2 ? 28 : BRIS0 + 1);           /* Poly Magic (BRIS), stor poly (3 OSC) */
+                    prog(e2 ? 28 : NR_BRIS(1));           /* Poly Magic (BRIS), stor poly (3 OSC) */
                     M->note(0, 36, 127); M->note(0, 48, 127); M->note(0, 55, 127); M->note(0, 60, 127); M->note(0, 64, 127); M->note(0, 67, 127);
                     for (b = 0; b < 500; b++) { memset(out, 0, sizeof out); M->render(out, 256); for (i2 = 0; i2 < 512; i2++) { if (out[i2] > 32767 || out[i2] < -32767) clipped++; if (abs(out[i2]) > pk) pk = abs(out[i2]); } }
                     M->midi(0xB0, 123, 0);
@@ -625,7 +647,7 @@ int main(int argc, char **argv)
             for (pass = 0; pass < 2; pass++) {
                 c1_lend = pass == 0;
                 M->release(); M->init(&HOST);
-                prog(e2 ? BRIS0 + 1 : 1);       /* one (3 OSC), Poly Magic (BRIS) */
+                prog(e2 ? NR_BRIS(1) : 1);       /* one (3 OSC), Poly Magic (BRIS) */
                 if (fx) { M->midi(0xB0, 91, 80); M->midi(0xB0, 92, 100); }   /* reverb och pump på */
                 else { M->midi(0xB0, 91, 0); M->midi(0xB0, 92, 0); }       /* utan (ljudens egna effekter av) */
                 for (b = 0; b < 50; b++) { memset(one[pass], 0, 512 * 4); M->render(one[pass], 256); }   /* (reverbet tonar ut: 0,2 s) */
@@ -704,7 +726,7 @@ int main(int argc, char **argv)
             for (pass = 0; pass < 2; pass++) {
                 int at = 0, j = 0;
                 M->release(); M->init(&HOST);
-                prog(BRIS0 + 1);
+                prog(NR_BRIS(1));
                 M->midi(0xB0, 91, 80);
                 if (tape2) M->midi(0xB0, 77, 40);
                 /* predelay över ett anrop (5,8 ms), så att den inte beror på anropets längd (se one_module.c) */
@@ -730,14 +752,14 @@ int main(int argc, char **argv)
     {
         int32_t out[512], i2, b, prev = 0, d_switch = 0, d_tail = 0, pk_after;
         M->release(); store_n = 0; M->init(&HOST);
-        prog(NEW0 + 59);                                     /* änglakör: stor hall */
+        prog(NR_ONE(59));                                     /* änglakör: stor hall */
         btn(HB_BTN_FX); btn(HB_BTN_FX);
         CHECK(drawn("RUM  2/5") && drawn("45") && drawn("90"), "änglakör: sitt eget reverb (mix 45, storlek 90)");
-        prog(NEW0 + 53);                                     /* funkmoog: torr bas */
+        prog(NR_ONE(53));                                     /* funkmoog: torr bas */
         CHECK(drawn("RUM  2/5") && drawn("0"), "funkmoog: inget reverb");
-        prog(NEW0 + 67);                                     /* lofi-keys: band på */
+        prog(NR_ONE(67));                                     /* lofi-keys: band på */
         CHECK(drawn("TAPE 30"), "lofi-keys: ERA på TAPE 30");
-        prog(NEW0 + 56);                                     /* supersåg: pumpar i takt */
+        prog(NR_ONE(56));                                     /* supersåg: pumpar i takt */
         btn(HB_BTN_FX); btn(HB_BTN_FX); btn(HB_BTN_FX);
         CHECK(drawn("PUMP  5/5") && drawn("55") && drawn("ALL") && drawn("1/4"), "supersåg: pump 55, 1/4, allt");
         CHECK(!drawn("*") , "ett nyladdat ljud är inte ändrat");
@@ -747,13 +769,13 @@ int main(int argc, char **argv)
         CHECK(name_shows("init*"), "reverbets mix ändrad: ljudet är ändrat (*)");
         /* Ljudbyte medan klangen klingar: förra ljudets klang klingar vidare som den var (inget steg, inget glid), tills
          * en ton spelas. Då tonas den ut på 23 ms och tonen får det nya ljudets reverb. */
-        prog(NEW0 + 62);                                     /* syntwavearp: kort pluck, reverb 30 */
+        prog(NR_ONE(62));                                     /* syntwavearp: kort pluck, reverb 30 */
         M->note(0, 60, 120); blocks_peak(20); M->note(0, 60, 0);
         for (b = 0; b < 110; b++) {                          /* 0,6 s: tonen har klingat ut, kvar är reverbets klang */
             memset(out, 0, sizeof out); M->render(out, 256);
             for (i2 = 0; i2 < 256; i2++) { int32_t v = out[2 * i2]; if (b > 90 && abs(v - prev) > d_tail) d_tail = abs(v - prev); prev = v; }
         }
-        prog(NEW0 + 53);                                     /* funkmoog: inget reverb */
+        prog(NR_ONE(53));                                     /* funkmoog: inget reverb */
         for (b = 0; b < 4; b++) {
             memset(out, 0, sizeof out); M->render(out, 256);
             for (i2 = 0; i2 < 256; i2++) { int32_t v = out[2 * i2]; if (abs(v - prev) > d_switch) d_switch = abs(v - prev); prev = v; }
@@ -768,7 +790,7 @@ int main(int argc, char **argv)
             pk_off = blocks_peak(20);
             printf("  ton i det torra ljudet: 0,9 s efter tonen %d\n", pk_off);
             CHECK(pk_off == 0, "en ton i det torra ljudet: förra klangen tonas ut, tonen får inget reverb");
-            prog(NEW0 + 62);                                 /* och tillbaka: reverbet tonas in igen */
+            prog(NR_ONE(62));                                 /* och tillbaka: reverbet tonas in igen */
             M->note(0, 60, 120); blocks_peak(20); M->note(0, 60, 0);
             blocks_peak(100);
             pk_note = blocks_peak(20);
@@ -784,7 +806,7 @@ int main(int argc, char **argv)
             const uint8_t *x = store + 8 + NPMAX * 4 + 4;   /* magic 4, version/preset/page/edited 4, p[] float, era float, sedan reverb och pump (en byte var) */
             float e;
             M->release(); store_n = 0; M->init(&HOST);
-            prog(e2 ? BRIS0 + 7 : 7);           /* acid (3 OSC), Ensemble (BRIS) */
+            prog(e2 ? NR_BRIS(7) : 7);           /* acid (3 OSC), Ensemble (BRIS) */
             btn(HB_BTN_SEL); enc(HB_ENC_KNOB1, -15);
             enc(HB_ENC_ALGORITHM, 30);          /* TAPE 30 sparas med ljudet */
             M->midi(0xB0, 91, 51); M->midi(0xB0, 92, 76);   /* reverbets mix 0,40 och pumpens djup 0,60 sparas också */
@@ -800,7 +822,7 @@ int main(int argc, char **argv)
             M->release();
             CHECK(M->init(&HOST) == 0, "ny start");
             M->draw(1); shot(base, n++);        /* 33, 35: samma ljud, ändrat (*), TAPE 30 */
-            CHECK(drawn(e2 ? "BRIS V2.4" : "3 OSC V2.4") && drawn(e2 ? "056" : "007"), e2 ? "BRIS-ljudet kommer tillbaka med BRIS-motorn" : "3 OSC-ljudet kommer tillbaka med sin motor");
+            CHECK(drawn(e2 ? "BRIS V2.5" : "3 OSC V2.5") && drawn(e2 ? "056" : "007"), e2 ? "BRIS-ljudet kommer tillbaka med BRIS-motorn" : "3 OSC-ljudet kommer tillbaka med sin motor");
             now_ms += 2000; M->draw(0);
             {   /* kom tillbaka: spara igen utan att röra något ger samma bytes */
                 uint8_t was[240]; uint32_t was_n = store_n;
@@ -825,7 +847,7 @@ int main(int argc, char **argv)
         memcpy(store, v1, sizeof v1); store_n = sizeof v1;
         M->release();
         CHECK(M->init(&HOST) == 0, "start med inställningar från ONE 1.0");
-        CHECK(drawn("009") && drawn("VOICE  1/2") && drawn("3 OSC V2.4"), "ONE 1.0: ljudet och sidan kommer tillbaka");
+        CHECK(drawn("009") && drawn("VOICE  1/2") && drawn("3 OSC V2.5"), "ONE 1.0: ljudet och sidan kommer tillbaka");
         btn(HB_BTN_SAVE);
         x = store + 8 + NPMAX * 4 + 4;
         { float e; memcpy(&e, store + 8 + NPMAX * 4, 4);
@@ -838,14 +860,14 @@ int main(int argc, char **argv)
         uint8_t v[240];
         uint8_t *x = v + 8 + NPMAX * 4 + 4;
         M->release(); store_n = 0; M->init(&HOST);
-        prog(BRIS0 + 7); M->midi(0xB0, 91, 51); btn(HB_BTN_ARP); btn(HB_BTN_SAVE);
+        prog(NR_BRIS(7)); M->midi(0xB0, 91, 51); btn(HB_BTN_ARP); btn(HB_BTN_SAVE);
         memcpy(v, store, SET_N);
         v[4] = 1; v[6] = 13;                    /* version 1; ARP var BRIS-motorns sida 13 (nu 14) */
         x[23] = 1; x[24] = 1; x[25] = x[26] = x[27] = 0;   /* motor BRIS, ARP på */
         memcpy(store, v, SET_N);
         M->release();
         CHECK(M->init(&HOST) == 0, "start med inställningar från ONE 2.0");
-        CHECK(drawn("056") && drawn("BRIS V2.4") && drawn("ARP  ON") && leds[HB_BTN_ARP] == 1u, "ONE 2.0: ljudet, motorn, ARP och sidan kommer tillbaka");
+        CHECK(drawn("056") && drawn("BRIS V2.5") && drawn("ARP  ON") && leds[HB_BTN_ARP] == 1u, "ONE 2.0: ljudet, motorn, ARP och sidan kommer tillbaka");
         btn(HB_BTN_SAVE);
         x = store + 8 + NPMAX * 4 + 4;
         CHECK(store[4] == 2 && x[0] == 40 && x[23] == 0 && x[NX] == 1 && x[NX + 1] == 1, "och sparas i det nya formatet, med Pressure av");
@@ -859,7 +881,7 @@ int main(int argc, char **argv)
         double e = 0, d1 = 0, d2 = 0;
         for (pass = 0; pass < 3; pass++) {
             M->release(); store_n = 0; M->init(&HOST);
-            prog(BRIS0 + 64);                   /* MPE Lead: modhjulet ger vibrato */
+            prog(NR_BRIS(64));                   /* MPE Lead: modhjulet ger vibrato */
             if (pass == 2) { btn(HB_BTN_GLO); btn(HB_BTN_GLO); btn(HB_BTN_GLO); enc(HB_ENC_KNOB1, 100); }   /* TOUCH: Pressure 100 */
             M->note(0, 62, 100);
             for (b = 0; b < 80; b++) {
@@ -930,7 +952,7 @@ int main(int argc, char **argv)
             M->midi(0xB0, 123, 0); blocks_peak(200);
         }
         btn(HB_BTN_ARP);
-        prog(BRIS0 + 1);                                     /* motorbyte med ARP på: sidan och arpeggiot följer med */
+        prog(NR_BRIS(1));                                     /* motorbyte med ARP på: sidan och arpeggiot följer med */
         CHECK(drawn("ARP  ON") && leds[HB_BTN_ARP] == 1u, "ARP: sidan ligger kvar när ljudet byter motor");
         M->note(0, 60, 100); CHECK(blocks_peak(60) > 1000, "ARP spelar i BRIS-motorn"); M->note(0, 60, 0);
         btn(HB_BTN_SEL); btn(HB_BTN_ARP);
@@ -971,7 +993,7 @@ int main(int argc, char **argv)
         CHECK(leds[HB_BTN_PLAY] == 1u && (drawn("SEQ  PLAY 1/5") || drawn("SEQ  PLAY 2/5") || drawn("SEQ  PLAY 3/5") || drawn("SEQ  PLAY 4/5") || drawn("SEQ  PLAY 5/5")),
               "PLAY: lysdioden tänd, skärmen visar steget som spelas");
         M->draw(1); shot(base, n++);                         /* 39: spelar */
-        prog(BRIS0 + 5);                                     /* motorbyte medan sekvensen går: den fortsätter i den nya motorn */
+        prog(NR_BRIS(5));                                     /* motorbyte medan sekvensen går: den fortsätter i den nya motorn */
         blocks_peak(4);
         CHECK(blocks_peak(200) > 1000 && leds[HB_BTN_PLAY] == 1u, "sekvensen fortsätter när ljudet byter motor");
         M->midi(0xFC, 0, 0); blocks_peak(2); M->draw(0);
@@ -1064,7 +1086,7 @@ int main(int argc, char **argv)
         int e2, b, k, under = 0, era2, playing = 0;
         for (era2 = 0; era2 < 2; era2++) for (e2 = 0; e2 < 2; e2++) {
             M->release(); store_n = 0; M->init(&HOST);
-            prog(e2 ? BRIS0 + 66 : 33);                  /* bla pad i båda motorerna: lång release, eko och ensemble */
+            prog(e2 ? NR_BRIS(66) : 33);                  /* bla pad i båda motorerna: lång release, eko och ensemble */
             M->midi(0xB0, 91, 90); M->midi(0xB0, 92, 80);
             if (era2) M->midi(0xB0, 77, 30);
             for (k = 0; k < 6; k++) M->note(0, (uint32_t)(48 + 4 * k), 100);

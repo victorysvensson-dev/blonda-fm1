@@ -9,6 +9,9 @@ import os
 import re
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import namn  # noqa: E402
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 motor = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("BLONDA_MOTOR", os.path.join(ROOT, "..", "..", "..", "blonda-motor"))
@@ -56,7 +59,7 @@ out.append(f"static const one_pv_t ONE_PV[{max(1, len(vals))}] = {{")
 out += [f"    {{OP_{k}, {num(v)}}}," for (i, v, k) in vals]
 out += ["};", f"#define ONE_NPRESETS {len(pres)}", f"#define ONE_FACTORY {js.get('factoryBank', 0)}",
         "static const one_preset_t ONE_PRESETS[ONE_NPRESETS] = {"]
-out += [f'    {{"{cstr(n)}", {f}, {c}}},' for (n, f, c) in pres]
+out += [f'    {{"{namn.cstr(namn.fm1("one", n))}", {f}, {c}}},' for (n, f, c) in pres]   # (namnen som FM-1 visar dem: tools/namn.py)
 out += ["};", "", "#endif", ""]
 dst = os.path.join(ROOT, "src", "one_presets.h")
 open(dst, "w", encoding="utf-8").write("\n".join(out))

@@ -1,8 +1,8 @@
 # BLONDA ONE för M-VAVE FM-1
 
 BLONDA ONE är en synth med två ljudmotorer, som modul för [fm1-dock](https://github.com/joakimeriksson/fm1-dock) på
-M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.4 (står överst på skärmen, efter
-motorns namn: `3 OSC V2.4` eller `BRIS V2.4`).
+M-VAVE FM-1. Varje ljud hör till en motor, och motorn byts med ljudet. Version 2.5 (står överst på skärmen, efter
+motorns namn: `3 OSC V2.5` eller `BRIS V2.5`).
 
 Skärmen är BLONDAs: en gul prickdisplay. Ljudets namn står i prickar i ett fönster med svaga prickar bakom, som
 displayen i BLONDAs pluggar och SEQ.3, och rattarnas värden visas som rader av prickar. Färgerna är BLONDAs (gult
@@ -11,17 +11,26 @@ E9C54A, petrol 227E7A, kräm E8E6DC, nästan svart 17181A). Tecknen ritas i `too
 | motor | ljud | vad den är |
 |---|---|---|
 | **3 OSC** | 000–049 | BRIS möter Moog: tre oscillatorer per röst (triangel, såg eller puls, fotlägen 32'–2'; oscillator 2 och 3 stäms ±7 halvtoner och ±50 cent), brus, en mixer som driver filtret (DRIVE) och en 4-polig stege där resonansen tunnar ut basen och på fullt självsvänger. ONE i `blonda-motor`. |
-| **BRIS** | 050–139 | BLONDAs sexstämmiga analoga poly efter GS Music Bree6: oscillator + sub, 4-polig stege. BRIS i `blonda-motor`. |
+| **BRIS** | 050–131 | BLONDAs sexstämmiga analoga poly efter GS Music Bree6: oscillator + sub, 4-polig stege. BRIS i `blonda-motor`. |
 
 Gemensamt för båda: sex röster (poly stereo, poly, mono, unison), LFO med fem former, två ADSR, stereoensemble och
 eko. Före motorerna, för alla ljud: **ARP** (arpeggio) och **SEQ** (stegsekvenser). Efter dem: reverbet **RUM**,
 **PUMP** (ducking i takt) och **ERA** (band och lofi).
 
 Ljuden i ordning: 000 init (3 OSC) · 001 one (signaturljudet) · 13 basar · 9 lead · 13 poly och pad · 7 tangenter
-och pluck · 6 effektljud · 050–138 BRIS 89 ljud (Poly Magic först) · 139 init (BRIS) · 140–159 tjugo nya 3 OSC-ljud
-efter klassiker som många älskar (version 2.3): hoppbrass, filmbrass, nattpad, funkmoog, visslead, glidlead,
-supersåg, trancepluck, stråkmaskin, änglakör, arenabrass, syntwavebas, syntwavearp, husorgel, morrsvep, slapbas,
-mjukpwm, lofi-keys, svävbas, åttabit. Skärmen skriver å ä ö som a a o.
+och pluck · 6 effektljud · 050–130 BRIS 81 ljud (Poly Magic först) · 131 init bris · 132–151 tjugo 3 OSC-ljud
+efter klassiker (version 2.3): hoppbrass, filmbrass, nattpad, funkmoog, visslead, glidlead, supersåg, trancepluck,
+stråkmaskin, änglakör, arenabrass, syntwavebas, syntwavearp, husorgel, morrsvep, slapbas, mjukpwm, lofi-keys,
+svävbas, åttabit · 152–161 tio i Oberheim-stil (version 2.5): glödpad, bländpoly, kvällsbrass, rundbas, åskbas,
+dubbelpuls, vågmatta, skimmerklav, sidenväv, fanfar. Prickdisplayen har å ä ö.
+
+Varje ljud har ett eget namn, och inget ljud låter nästan som ett annat (version 2.5; jämfört med spektrum, kurva och
+klangens rörelse). BRIS-ljud som hette som ett 3 OSC-ljud har fått egna namn på FM-1 (blå dimma, tjockbas, studsbas,
+mullerbas, kvintsång, flöjtlead, tidvatten, slumpbubbel, pipfilter, ljudmur, munkkör, mörker, kaskad, init bris; 3 OSC:s
+poly synth heter trepoly), de numrerade Riser 2–5 heter Lift Off, Ascend, Updraft och Skyward, Juno Low Strings 1 och 2
+heter Low Strings och Dark Strings, Pluck 1 heter Bright Pluck. Åtta BRIS-ljud är inte med, för att nästan samma ljud
+redan finns: pluck, ekopluck, brass, syntbrass, Synth Horns, klocka, Strings och Winter. Namnen och det som tas bort
+står i `tools/namn.py`; ljuden själva är som i blonda-motor.
 
 ## Ljudets effekter
 
@@ -75,7 +84,7 @@ vågform, och en oscillator på nivå 0 räknas inte alls.
 
 ## Ljudet är testat mot blonda-motor
 
-- **`test/likhet.py`, `test/bris/likhet.py`** – alla 160 ljud med samma toner, varje motor mot sitt original: nivå
+- **`test/likhet.py`, `test/bris/likhet.py`** – alla ljud med samma toner, varje motor mot sitt original: nivå
   (±0,25 dB), klang i 1/3-oktavband (≤ 0,5 dB) och vågform (korrelation ≥ 0,98). Senast: värst 0,03 dB nivå,
   0,20 dB klang. Två 3 OSC-ljud där filtret självsvänger utan oscillator (visselfilter, laser) bedöms på nivå och
   klang: svängningen växer fram ur grundbruset och får en annan fas vid minsta avrundningsskillnad.
@@ -84,7 +93,7 @@ vågform, och en oscillator på nivå 0 räknas inte alls.
   vrids, självsvängning, alla LFO-former, ljudbyte och röstläge under spel, ekot ändras, ytterlägen, full volym;
   för 3 OSC också vågform, fotläge, stämning, brus, drivning, pulsbredd och PWM under spel.
 - **`test/modul_host.c`** – modulen körs oförändrad i en låtsas-FM-1 med fm1-dock:s eget typsnitt: skärmbilder av
-  båda motorernas sidor, rattar, knappar, lysdioder, MIDI med bank, alla 160 ljud hörs och ingen klippning, ljudens egna effekter, klangen vid ljudbyte, ARP och
+  båda motorernas sidor, rattar, knappar, lysdioder, MIDI med bank, alla 162 ljud hörs och ingen klippning, ljudens egna effekter, klangen vid ljudbyte, ARP och
   SEQ (i ljudet, på skärmen, med MIDI-klocka, sparade),
   motorbyte under en ton (inget knäpp, ingen ton hänger kvar, klangen ligger kvar, böj och hjul följer med),
   reverbet dör ut till tystnad, pumpen duckar på slaget och följer MIDI-klocka, två kärnor låter som en, anrop av
@@ -102,8 +111,8 @@ Webbemulatorn i `web/` kör samma modul i webbläsaren.
 
 | | |
 |---|---|
-| tangenter / MIDI | 6 röster, velocity, pitch bend, modhjul (CC1), tryck, sustain (CC64). Program change = ljud 0–127; CC 0 = 1 först ger ljud 128–159. MIDI-klocka, start och stopp: ARP, SEQ och PUMP följer |
-| PRESETS | byt ljud (160 st, laddas direkt med sina effekter) |
+| tangenter / MIDI | 6 röster, velocity, pitch bend, modhjul (CC1), tryck, sustain (CC64). Program change = ljud 0–127; CC 0 = 1 först ger ljud 128–161. Tangenternas lysdioder glöder svagt (som FX, ENV och SEL), och den man spelar på lyser fullt. MIDI-klocka, start och stopp: ARP, SEQ och PUMP följer |
+| PRESETS | byt ljud (162 st, laddas direkt med sina effekter) |
 | KNOB1–4 | de fyra parametrarna som visas |
 | SELECT | nästa / förra sidan |
 | ALGORITHM | **ERA**: 0 MODERN (rent), 1–60 TAPE (kassett som slits mer och mer), 61–100 LOFI (färre bitar, lägre samplingsfrekvens). Visas uppe till höger på skärmen, sparas med SAVE, MIDI CC 77 |
@@ -174,7 +183,8 @@ långsam rörelse, höskärning, bredd och ducking efter det man spelar.
 MIDI CC 91 är mixen. Reverbet hör till ljudet (se Ljudets effekter) och sparas med SAVE. Det ligger i `gemensamt/effekter/rum_fm1.c` och testas mot blonda-motor i 15 fall
 (`gemensamt/test/rum_test.py`: skillnad −50 till −78 dB när inget vrids). Skillnader mot pluggen: linjerna ligger i
 16 bitar med brusformning (avrundningsbruset läggs i diskanten, där linjernas dämpning tar bort det) i stället för
-double, och klangen räknas ur ljudet före varje block om 256 sampel, så en predelay under 5,8 ms blir 5,8 ms.
+double, och klangen räknas ur ljudet före varje block om 256 sampel, så en predelay under 5,8 ms blir 5,8 ms. Under ett steg blir värdet 0 (version 2.5), så att klangen dör ut helt i stället för att ligga kvar som ett svagt
+brus på ±1 steg.
 
 ## PUMP – ducking i takt
 
@@ -194,8 +204,13 @@ SLITEN ligger i `gemensamt/effekter/` så att fler moduler kan använda den, och
 media (`gemensamt/test/sliten_test.py`). Skillnad mot pluggen: bandbufferten är kortare (modulens minne), så de
 digitala mediernas avbrott med upprepning används inte här.
 
-Bandbruset är lågt (version 2.4): utan toner omkring -78 dBFS på TAPE 10 och -65 dBFS på TAPE 60. SLITEN är
-densamma som i blonda-motor; det är ONE:s ratt som ställer bruset lägre än pluggens standard.
+Bandet brusar inte (version 2.5): det hörs i svaj, mättnad och ton, men utan toner är det helt tyst. SLITEN är
+densamma som i blonda-motor; det är ONE:s ratt som ställer bruset på 0.
+
+## Volym
+
+Utgången är 6 dB starkare än motorerna (version 2.5: ljuden låg lågt mot annat), med en begränsare som håller
+topparna under -0,5 dBFS och släpper på omkring 0,15 s, så att inget klipper. Motorerna själva låter som i blonda-motor.
 
 ## Två kärnor
 

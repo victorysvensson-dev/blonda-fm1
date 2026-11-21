@@ -41,11 +41,14 @@ static inline float onepole(float hz) { return 1.f - sm_exp(-TWOPI * hz / SR); }
 
 /* Till int16, avrundat, med felet buret till nästa sampel (första ordningens brusformning): avrundningsbruset
  * hamnar i diskanten, där linjernas dämpning och interpolation tar bort det, i stället för i hela registret.
- * e är felet från förra samplet i samma buffert; klipps värdet bärs inget fel. */
+ * e är felet från förra samplet i samma buffert; klipps värdet bärs inget fel. Under ett steg (med felet) blir det
+ * 0 och felet släpps: annars bär felet och linjernas återkoppling varandra, och klangen dör aldrig ut helt utan
+ * ligger kvar som ett brus på ±1 steg. */
 #define QWRITE(dst, val, scale, e) do { \
     float qv_ = (val) * (scale) + (e); \
     int32_t qi_ = (int32_t)(qv_ + 32768.5f) - 32768; \
-    if (qv_ > 32767.f) { qi_ = 32767; qv_ = 32767.f; } \
+    if (qv_ < 1.f && qv_ > -1.f) { qi_ = 0; qv_ = 0.f; } \
+    else if (qv_ > 32767.f) { qi_ = 32767; qv_ = 32767.f; } \
     else if (qv_ < -32767.f) { qi_ = -32767; qv_ = -32767.f; } \
     (e) = qv_ - (float)qi_; \
     (dst) = (int16_t)qi_; \
