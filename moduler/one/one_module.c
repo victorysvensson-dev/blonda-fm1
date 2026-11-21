@@ -43,7 +43,7 @@
 #ifndef HB_F_MIDI_RT
 #define HB_F_MIDI_RT 16u                        /* nyare fm1-dock: MIDI-klockan kommer i ljudavbrottet (annars huvudloopen) */
 #endif
-#define ONE_VERSION "V2.4"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
+#define ONE_VERSION "V2.5"                      /* visas på skärmen; höj när modulen ändras (module.cfg: version) */
 
 static const hb_host_t *H;
 static char *put_int(char *s, int32_t v);
@@ -177,7 +177,7 @@ static const engine_t *AE = &ENGINES[ENG_ONE];
 /* ljuden i ordning (src/ljud.h, genererad av tools/gen_ljud.py): 3 OSC 0-49, BRIS 1-89, BRIS init, 3 OSC 50-.
  * Varje ljud har sin motor, sitt ljud i motorn och sina effekter (reverb, pump, ERA). */
 #define NPRESETS NLJUD
-typedef char ljud_one_ok[ONE_NPRESETS + BRIS_NPRESETS == NLJUD ? 1 : -1];   /* (alla motorernas ljud finns med) */
+typedef char ljud_one_ok[ONE_NPRESETS + BRIS_NPRESETS - LJUD_BORT == NLJUD ? 1 : -1];   /* (motorernas ljud, utom de borttagna) */
 static int preset_engine(int i) { return LJUD[i].eng; }
 static int preset_index(int i) { return LJUD[i].idx; }
 /* och tillbaka: ljud nr idx i motorn e, eller -1 */
@@ -252,6 +252,10 @@ static const uint16_t C_YEL = HB_RGB(0xE9, 0xC5, 0x4A),  /* tända prickar, vär
 /* ------------------------------------------------------------------ ERA: band och lofi efter motorerna */
 static sliten_t tape;
 static volatile int32_t era;                    /* 0..100, ALGORITHM-ratten */
+#define OUT_GAIN 2.f                            /* utgångens förstärkning (+6 dB, 2.5): ljuden låg lågt mot annat */
+#define OUT_CEIL 0.944f                         /* begränsarens tak (-0,5 dBFS) */
+#define OUT_REL 0.00015f                        /* begränsaren släpper: omkring 0,15 s */
+static float lim_g = 1.f;                       /* begränsarens förstärkning (1: ingen) */
 static int tape_on;                             /* SLITEN räknar (även medan den tonar ut) */
 
 /* ratten till SLITEN:s parametrar (BLONDA SLITEN i blonda-motor). Inga avbrott: de digitala mediernas
@@ -267,8 +271,8 @@ static void era_apply(void)
         sliten_set(&tape, SL_wow, 0.35f);
         sliten_set(&tape, SL_flut, 0.3f);
         sliten_set(&tape, SL_sat, 0.3f + 0.4f * t);
-        sliten_set(&tape, SL_brus, 0.03f + 0.07f * t);   /* bandbrus: lågt (2.4; förut 0,15-0,5, ett högt brus
-                                                 * utan toner), 14 dB lägre: -78 till -65 dBFS RMS utan toner */
+        sliten_set(&tape, SL_brus, 0.f);        /* inget bandbrus (2.5): bandet hörs i svaj, mättnad och ton, men det
+                                                 * brusar inte när inget spelas */
         sliten_set(&tape, SL_avbr, 0.15f * t * t);
         sliten_set(&tape, SL_ton, 0.62f - 0.25f * t);
     } else {                                    /* LOFI: digitalt, färre bitar och lägre samplingsfrekvens */
@@ -409,6 +413,13 @@ static void set_param(int p, float v)
     }
     E->set(p, v);
     edited = 1;
+}
+
+/* tangenterna: glöder (syns i mörkret); den man spelar på lyser fullt (värden tänder den medan den hålls) */
+static void key_glow(uint32_t on)
+{
+    uint32_t k;
+    for (k = 0; k < 27u; k++) H->led(HB_LED_KEY(k), on);
 }
 
 static void leds(void)
@@ -609,8 +620,13 @@ static void render(int32_t *out, uint32_t n)
             sliten_process(&tape, bufL, bufR, k);
             if (era <= 0 && tape.sWet < 0.0005f) tape_on = 0;   /* helt uttonad: räkna inte längre */
         }
-        for (i = 0; i < k; i++) {
-            float l = clampf(bufL[i], -1.f, 1.f) * 32767.f, r = clampf(bufR[i], -1.f, 1.f) * 32767.f;
+        for (i = 0; i < k; i++) {               /* utgången: OUT_GAIN högre, och en begränsare som håller topparna
+                                                 * under OUT_CEIL (släpper på OUT_REL); så klipper inget */
+            float l = bufL[i] * OUT_GAIN, r = bufR[i] * OUT_GAIN, a = l < 0.f ? -l : l, b2 = r < 0.f ? -r : r;
+            lim_g += (1.f - lim_g) * OUT_REL;
+            if (b2 > a) a = b2;
+            if (a * lim_g > OUT_CEIL) lim_g = OUT_CEIL / a;
+            l = clampf(l * lim_g, -1.f, 1.f) * 32767.f; r = clampf(r * lim_g, -1.f, 1.f) * 32767.f;
             out[2u * i] += (int32_t)l;
             out[2u * i + 1u] += (int32_t)r;
         }
@@ -825,7 +841,8 @@ static void draw(uint32_t full)
     uint32_t sp = (uint32_t)play | (uint32_t)rec << 1 | (uint32_t)(spel_set.arp_on != 0) << 2 | (uint32_t)spel_seq.len << 8 | (uint32_t)step << 16;
     int on_arp, on_seq, hint;
     rum_check();
-    if (full) {
+    if (full) {                                 /* (också när väljaren stängs: tangenternas glöd igen) */
+        key_glow(2u);
         H->fill(0, HB_TOP, 240, 240 - HB_TOP, C_BLACK);
         shown.preset = shown.page = shown.edited = shown.saved = shown.era = shown.eng = -1;
         shown.voices = ~0u;
@@ -967,6 +984,7 @@ static int init(const hb_host_t *h)
     AE = E;                                     /* ljudavbrottet går inte än: ingen uttoning att göra */
     spel_init(&SP_OUT);
     leds();
+    key_glow(2u);
     H->log("one: redo");
     return 0;
 }
@@ -976,6 +994,7 @@ static void release(void)
     bris_all_notes_off(); one_all_notes_off();
     bris_reset(); one_reset();
     sliten_reset(&tape);
+    key_glow(0u);                               /* nästa modul har sina egna lampor */
     rum_on = 0;
 }
 

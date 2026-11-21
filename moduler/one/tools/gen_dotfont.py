@@ -42,7 +42,19 @@ N      O      P      Q      R      S      T      U      V      W      X      Y  
 ..#..  .....  .#...  .....  ..#..  .....  ..#..
 ..#..  ..#..  #....  .....  .....  ..#..  .....
 .....  .....  #....  .....  ..#..  .....  ..#..
+
+Å      Ä      Ö
+..#..  .#.#.  .#.#.
+.#.#.  .....  .....
+..#..  .###.  .###.
+.###.  #...#  #...#
+#...#  #####  #...#
+#####  #...#  #...#
+#...#  #...#  .###.
 """
+
+# å ä ö: egna tecken 1, 2, 3 i namnen (tools/namn.py skriver dem så; små som stora)
+KOD = {"Å": "\x01", "Ä": "\x02", "Ö": "\x03"}
 
 glyphs = {}
 blocks = [b for b in GLYPHS.strip("\n").split("\n\n")]
@@ -54,17 +66,25 @@ for b in blocks:
     for i, ch in enumerate(names):
         g = [r[i] for r in rows]
         assert all(len(x) == 5 and set(x) <= set("#.") for x in g), (ch, g)
-        glyphs[ch] = [int(x.replace("#", "1").replace(".", "0"), 2) for x in g]
+        glyphs[KOD.get(ch, ch)] = [int(x.replace("#", "1").replace(".", "0"), 2) for x in g]
+
+
+def esc(c):
+    return "\\%03o" % ord(c) if ord(c) < 32 else "\\\\" if c == "\\" else "\\\"" if c == '"' else c
+
+
+def visa(c):
+    return {"\x01": "Å", "\x02": "Ä", "\x03": "Ö"}.get(c, c)
 
 chars = sorted(glyphs)
 out = ["/* GENERERAD FIL – ändra inte för hand. Källa: tools/gen_dotfont.py (teckningarna står där). */",
        "/* BLONDA ONE:s prickdisplay: tecken om 5 x 7 prickar, en byte per rad (bit 4 = vänstra pricken). */",
        "#ifndef BLONDA_DOT_H", "#define BLONDA_DOT_H", "#include <stdint.h>", "",
        f"#define DOT_NGLYPHS {len(chars)}",
-       "static const char DOT_CHARS[DOT_NGLYPHS + 1] = \"" + "".join("\\\\" if c == "\\" else "\\\"" if c == '"' else c for c in chars) + "\";",
+       "static const char DOT_CHARS[DOT_NGLYPHS + 1] = \"" + "".join(esc(c) for c in chars) + "\";",
        "static const uint8_t DOT_ROWS[DOT_NGLYPHS][7] = {"]
 for c in chars:
-    out.append("    {" + ", ".join(f"0x{v:02x}" for v in glyphs[c]) + "},   /* " + c + " */")
+    out.append("    {" + ", ".join(f"0x{v:02x}" for v in glyphs[c]) + "},   /* " + visa(c) + " */")
 out += ["};", "",
         "/* tecknets sju rader, eller 0 (ett tecken som inte finns ritas som mellanrum; små bokstäver som stora) */",
         "static const uint8_t *dot_glyph(char c)",
